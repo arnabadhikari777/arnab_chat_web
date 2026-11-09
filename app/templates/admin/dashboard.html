@@ -1,0 +1,16 @@
+{% extends "admin/layout.html" %}
+{% block content %}
+<h2>{{ t('admin.nav.dashboard') }}</h2>
+<div class="stats">
+  {% for key, value in [
+    ('users_total', s.users_total), ('users_verified', s.users_verified), ('online_now', s.online_now),
+    ('users_new_day', s.users_new_day), ('users_new_week', s.users_new_week),
+    ('users_public', s.users_public), ('users_private', s.users_private),
+    ('users_suspended', s.users_suspended), ('users_banned', s.users_banned),
+    ('conversations', s.conversations), ('messages_total', s.messages_total), ('messages_day', s.messages_day),
+    ('requests_pending', s.requests_pending), ('reports_open', s.reports_open), ('announcements_active', s.announcements_active)] %}
+    <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
+  {% endfor %}
+</div>
+<p class="muted">{{ t('admin.privacy_note') }}</p>
+{% endblock %}

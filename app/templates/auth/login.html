@@ -1,0 +1,24 @@
+{% extends "auth/layout.html" %}
+{% block title %}{{ t('auth.login.title') }} - {{ app_name }}{% endblock %}
+{% block heading %}{{ t('auth.login.title') }}{% endblock %}
+{% block content %}
+{% if error %}<div class="banner banner--error" role="alert">{{ t(error[0], **error[1]) }}</div>{% endif %}
+<form method="post" class="stack" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <div class="field">
+    <label class="field__label" for="identifier">{{ t('field.identifier') }}</label>
+    <input class="input" id="identifier" name="identifier" value="{{ identifier }}" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+  </div>
+  <div class="field">
+    <label class="field__label" for="password">{{ t('field.password') }}</label>
+    <div class="input-wrap">
+      <input class="input" id="password" name="password" type="password" autocomplete="current-password" required>
+      <button class="icon-btn" type="button" data-toggle-password="password" aria-label="{{ t('common.show_password') }}"><svg class="icon"><use href="#i-eye"/></svg></button>
+    </div>
+  </div>
+  <a href="{{ url_for('auth.forgot_password') }}">{{ t('auth.forgot_link') }}</a>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('auth.login.submit') }}</button>
+  <p class="muted center">{{ t('auth.no_account') }} <a href="{{ url_for('auth.register') }}">{{ t('auth.register.submit') }}</a></p>
+</form>
+{% endblock %}

@@ -1,0 +1,57 @@
+# ============ Secrets (NEVER commit) ============
+.env
+.env.example
+*.pem
+*.key
+.secret_key
+.venv
+.git
+chat.db
+
+# ============ Live data (stays on the server) ============
+database.db
+.db
+.sqlite
+.sqlite3
+backups/
+uploads/notes/*
+
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+ENV/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ============ Editors / OS ============
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Logs / temp / leftovers ============
+*.log
+*.tmp
+*.bak
+*.orig
+*.zip
+
+# test fixture (schema only, zero rows) must be committed
+!tests/fixtures/*.db
+chat.db

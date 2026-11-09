@@ -1,0 +1,17 @@
+{% extends "auth/layout.html" %}
+{% from "partials/macros.html" import err with context %}
+{% block title %}{{ t('auth.forgot.title') }} - {{ app_name }}{% endblock %}
+{% block heading %}{{ t('auth.forgot.title') }}{% endblock %}
+{% block intro %}<p class="muted">{{ t('auth.forgot.text') }}</p>{% endblock %}
+{% block content %}
+<form method="post" class="stack" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="field">
+    <label class="field__label" for="email">{{ t('field.email') }}</label>
+    <input class="input" id="email" name="email" type="email" value="{{ email }}" autocomplete="email" inputmode="email" required {% if errors.get('email') %}aria-invalid="true"{% endif %}>
+    {{ err(errors, 'email') }}
+  </div>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('auth.forgot.submit') }}</button>
+  <p class="muted center"><a href="{{ url_for('auth.login') }}">{{ t('common.back') }}</a></p>
+</form>
+{% endblock %}

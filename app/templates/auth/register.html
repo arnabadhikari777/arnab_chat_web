@@ -1,0 +1,70 @@
+{% extends "auth/layout.html" %}
+{% from "partials/macros.html" import err with context %}
+{% block title %}{{ t('auth.register.title') }} - {{ app_name }}{% endblock %}
+{% block heading %}{{ t('auth.register.title') }}{% endblock %}
+{% block content %}
+<form method="post" enctype="multipart/form-data" class="stack" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="field">
+    <label class="photo-pick" for="photo">
+      <span class="photo-pick__circle" id="photo-preview"><svg class="icon"><use href="#i-user"/></svg></span>
+      <span class="field__label">{{ t('field.profile_photo') }}</span>
+    </label>
+    <input class="sr-only" type="file" id="photo" name="photo" accept="image/*" data-preview-target="photo-preview" data-max-bytes="{{ max_mb * 1024 * 1024 }}" data-max-mb="{{ max_mb }}">
+    <span class="field__hint">{{ t('hint.photo_optional') }} {{ t('hint.photo', size=max_mb) }}</span>
+    {{ err(errors, 'photo') }}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="full_name">{{ t('field.full_name') }}</label>
+    <input class="input" id="full_name" name="full_name" value="{{ form.get('full_name', '') }}" autocomplete="name" maxlength="60" required {% if errors.get('full_name') %}aria-invalid="true"{% endif %}>
+    {{ err(errors, 'full_name') }}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="email">{{ t('field.email') }}</label>
+    <input class="input" id="email" name="email" type="email" value="{{ form.get('email', '') }}" autocomplete="email" inputmode="email" required {% if errors.get('email') %}aria-invalid="true"{% endif %}>
+    {{ err(errors, 'email') }}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="username">{{ t('field.username') }}</label>
+    <input class="input" id="username" name="username" value="{{ form.get('username', '') }}" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" required {% if errors.get('username') %}aria-invalid="true"{% endif %}>
+    <span class="field__hint">{{ t('hint.username') }}</span>
+    {{ err(errors, 'username') }}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="password">{{ t('field.password') }}</label>
+    <div class="input-wrap">
+      <input class="input" id="password" name="password" type="password" autocomplete="new-password" required {% if errors.get('password') %}aria-invalid="true"{% endif %}>
+      <button class="icon-btn" type="button" data-toggle-password="password" aria-label="{{ t('common.show_password') }}"><svg class="icon"><use href="#i-eye"/></svg></button>
+    </div>
+    <span class="field__hint">{{ t('hint.password') }}</span>
+    {{ err(errors, 'password') }}
+  </div>
+
+  <div class="field">
+    <label class="field__label" for="confirm_password">{{ t('field.confirm_password') }}</label>
+    <input class="input" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required {% if errors.get('confirm_password') %}aria-invalid="true"{% endif %}>
+    {{ err(errors, 'confirm_password') }}
+  </div>
+
+  <fieldset class="choice-group">
+    <legend class="field__label">{{ t('field.account_type') }}</legend>
+    <label class="choice">
+      <input type="radio" name="account_type" value="public" required {% if form.get('account_type') == 'public' %}checked{% endif %}>
+      <span class="choice__body"><strong>{{ t('account.public') }}</strong><span class="field__hint">{{ t('hint.account_public') }}</span></span>
+    </label>
+    <label class="choice">
+      <input type="radio" name="account_type" value="private" {% if form.get('account_type') == 'private' %}checked{% endif %}>
+      <span class="choice__body"><strong>{{ t('account.private') }}</strong><span class="field__hint">{{ t('hint.account_private') }}</span></span>
+    </label>
+    {{ err(errors, 'account_type') }}
+  </fieldset>
+
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('auth.register.submit') }}</button>
+  <p class="muted center">{{ t('auth.have_account') }} <a href="{{ url_for('auth.login') }}">{{ t('auth.login.submit') }}</a></p>
+</form>
+{% endblock %}

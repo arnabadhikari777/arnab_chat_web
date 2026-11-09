@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import avatar, err, flashes, csrf with context %}
+{% block title %}{{ t('profile.edit') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar">
+  <a class="icon-btn" href="{{ url_for('settings.index') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
+  <span class="topbar__title">{{ t('profile.edit') }}</span>
+</header>
+<main class="page">
+  {{ flashes() }}
+  <form method="post" enctype="multipart/form-data" class="stack" novalidate>
+    {{ csrf() }}
+
+    <div class="field">
+      <span class="field__label">{{ t('field.cover_photo') }}</span>
+      <label class="cover-pick" for="cover">
+        <span class="cover cover--{{ 'abcde'[current_user.id % 5] }}" id="cover-preview">
+          {% if current_user.cover_url %}<img src="{{ current_user.cover_url }}" alt="">{% endif %}
+        </span>
+        <span class="cover-pick__badge"><svg class="icon icon--sm"><use href="#i-plus"/></svg>{{ t('field.cover_photo') }}</span>
+      </label>
+      <input class="sr-only" type="file" id="cover" name="cover" accept="image/*" data-preview-target="cover-preview" data-max-bytes="{{ max_mb * 1024 * 1024 }}" data-max-mb="{{ max_mb }}">
+      <span class="field__hint">{{ t('hint.cover', size=max_mb) }}</span>
+      {{ err(errors, 'cover') }}
+    </div>
+
+    <div class="field">
+      <label class="photo-pick" for="avatar">
+        <span class="photo-pick__circle" id="avatar-preview">
+          {% if current_user.avatar_url %}<img src="{{ current_user.avatar_url }}" alt="">{% else %}<svg class="icon"><use href="#i-user"/></svg>{% endif %}
+        </span>
+        <span class="field__label">{{ t('field.profile_photo') }}</span>
+      </label>
+      <input class="sr-only" type="file" id="avatar" name="avatar" accept="image/*" data-preview-target="avatar-preview" data-max-bytes="{{ max_mb * 1024 * 1024 }}" data-max-mb="{{ max_mb }}">
+      <span class="field__hint">{{ t('hint.photo', size=max_mb) }}</span>
+      {{ err(errors, 'avatar') }}
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="full_name">{{ t('field.full_name') }}</label>
+      <input class="input" id="full_name" name="full_name" maxlength="60" required autocomplete="name"
+             value="{{ form.get('full_name', current_user.full_name) }}" {% if errors.get('full_name') %}aria-invalid="true"{% endif %}>
+      {{ err(errors, 'full_name') }}
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="username">{{ t('field.username') }}</label>
+      <input class="input" id="username" value="@{{ current_user.username }}" disabled>
+      <span class="field__hint">{{ t('hint.username_locked') }}</span>
+    </div>
+
+    <div class="field">
+      <label class="field__label" for="bio">{{ t('field.bio') }}</label>
+      <textarea class="input input--area" id="bio" name="bio" rows="4" maxlength="300" {% if errors.get('bio') %}aria-invalid="true"{% endif %}>{{ form.get('bio', current_user.bio) }}</textarea>
+      <span class="field__hint">{{ t('hint.bio') }}</span>
+      {{ err(errors, 'bio') }}
+    </div>
+
+    <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('common.save') }}</button>
+  </form>
+</main>
+{% with active='settings' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

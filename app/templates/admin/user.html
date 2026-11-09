@@ -1,0 +1,33 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import avatar, account_chip, csrf with context %}
+{% block content %}
+<section class="profile-card">
+  {{ avatar(target, 'avatar--lg') }}
+  <div class="stack stack--tight"><h2>{{ target.full_name }}</h2><span class="muted">@{{ target.username }}</span>{{ account_chip(target) }}</div>
+</section>
+<dl class="facts">
+  <dt>{{ t('field.email') }}</dt><dd>{{ target.email }}</dd>
+  <dt>{{ t('admin.user.verified') }}</dt><dd>{{ t('common.yes') if target.is_email_verified else t('common.no') }}</dd>
+  <dt>{{ t('admin.user.role') }}</dt><dd>{{ target.role }}</dd>
+  <dt>{{ t('admin.user.status') }}</dt><dd>{{ t('admin.status.' ~ target.status) }}</dd>
+  <dt>{{ t('admin.user.joined') }}</dt><dd>{{ target.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
+  <dt>{{ t('admin.user.last_seen') }}</dt><dd>{% if d.online %}{{ t('status.online') }}{% elif target.last_seen_at %}{{ target.last_seen_at.strftime('%Y-%m-%d %H:%M') }} UTC{% else %}-{% endif %}</dd>
+  <dt>{{ t('admin.user.language') }}</dt><dd>{{ target.language }}</dd>
+  <dt>{{ t('admin.user.messages_sent') }}</dt><dd>{{ d.messages_sent }}</dd>
+  <dt>{{ t('admin.user.conversations') }}</dt><dd>{{ d.conversations }}</dd>
+  <dt>{{ t('admin.user.reports_against') }}</dt><dd>{{ d.reports_against }}</dd>
+  <dt>{{ t('admin.user.reports_made') }}</dt><dd>{{ d.reports_made }}</dd>
+</dl>
+{% if target.is_admin or target.id == current_user.id %}
+  <p class="banner banner--success">{{ t('admin.user.protected') }}</p>
+{% else %}
+  <form method="post" action="{{ url_for('admin.user_status', user_id=target.id) }}" class="stack">
+    {{ csrf() }}
+    <label class="field__label" for="status">{{ t('admin.user.change_status') }}</label>
+    <select class="input" id="status" name="status">
+      {% for st in ['active','suspended','banned'] %}<option value="{{ st }}" {% if target.status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
+    </select>
+    <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
+  </form>
+{% endif %}
+{% endblock %}

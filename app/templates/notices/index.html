@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import flashes, csrf with context %}
+{% block title %}{{ t('nav.notices') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar"><span class="topbar__title">{{ t('nav.notices') }}</span></header>
+<main class="page page--flush">
+  <div class="page__inner">{{ flashes() }}</div>
+  {% if items %}
+    <form method="post" action="{{ url_for('notices.read_all') }}" class="notice-actions">
+      {{ csrf() }}
+      <button class="btn btn--secondary" type="submit" {% if not unread %}disabled{% endif %}><svg class="icon"><use href="#i-check2"/></svg>{{ t('notice.mark_all') }}</button>
+    </form>
+    <div class="list">
+      {% for it in items %}
+        <a class="list-item notice {% if not it.note.is_read %}notice--unread{% endif %}" href="{{ url_for('notices.go', notification_id=it.note.id) }}">
+          <span class="notice__icon"><svg class="icon"><use href="#{{ it.icon }}"/></svg></span>
+          <span class="list-item__main">
+            <span class="notice__text">{{ it.text }}</span>
+            <time class="list-item__time" data-ts="{{ it.note.created_at.isoformat() }}Z">{{ it.note.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</time>
+          </span>
+          {% if not it.note.is_read %}<span class="notice__dot" aria-label="{{ t('notice.unread') }}"></span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+    <nav class="pager" aria-label="Pages">
+      {% if page > 1 %}<a class="btn btn--secondary" href="{{ url_for('notices.index', page=page - 1) }}">{{ t('people.prev') }}</a>{% else %}<span></span>{% endif %}
+      {% if has_next %}<a class="btn btn--secondary" href="{{ url_for('notices.index', page=page + 1) }}">{{ t('people.next') }}</a>{% endif %}
+    </nav>
+  {% else %}
+    <div class="empty">
+      <div class="empty__icon"><svg class="icon"><use href="#i-bell"/></svg></div>
+      <h3>{{ t('empty.notices.title') }}</h3>
+      <p class="muted">{{ t('empty.notices.text') }}</p>
+    </div>
+  {% endif %}
+</main>
+{% with active='notices' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

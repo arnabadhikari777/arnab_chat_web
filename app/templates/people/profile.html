@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import avatar, account_chip, flashes, csrf with context %}
+{% block title %}{{ person.full_name }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar">
+  <a class="icon-btn" href="{{ url_for('people.index') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
+  <span class="topbar__title">{{ person.full_name }}</span>
+</header>
+<main class="page page--flush">
+  <div class="cover cover--{{ 'abcde'[person.id % 5] }}">
+    {% if person.cover_url %}<img src="{{ person.cover_url }}" alt="">{% endif %}
+  </div>
+  <div class="profile-body">
+    <div class="profile-body__avatar">{{ avatar(person, 'avatar--lg avatar--ring') }}</div>
+    <h1 class="profile-body__name">{{ person.full_name }}</h1>
+    <div class="row"><span class="muted">@{{ person.username }}</span>{{ account_chip(person) }}</div>
+    <p class="bio">{% if person.bio %}{{ person.bio }}{% else %}<span class="muted">{{ t('profile.no_bio') }}</span>{% endif %}</p>
+
+    {{ flashes() }}
+
+    {% if is_me %}
+      <a class="btn btn--secondary btn--block" href="{{ url_for('settings.edit_profile') }}">{{ t('profile.edit') }}</a>
+    {% elif rel.conversation %}
+      <a class="btn btn--block" href="{{ url_for('chat.room', conversation_id=rel.conversation.id) }}"><svg class="icon"><use href="#i-chat"/></svg>{{ t('action.open_chat') }}</a>
+    {% elif rel.received_pending %}
+      <p class="banner banner--success">{{ t('profile.request_received', name=person.full_name) }}</p>
+      <div class="row row--split">
+        <form method="post" action="{{ url_for('people.accept', request_id=rel.received_pending.id) }}">{{ csrf() }}<button class="btn" type="submit">{{ t('action.accept') }}</button></form>
+        <form method="post" action="{{ url_for('people.reject', request_id=rel.received_pending.id) }}">{{ csrf() }}<button class="btn btn--secondary" type="submit">{{ t('action.reject') }}</button></form>
+      </div>
+    {% elif person.is_public %}
+      <form method="post" action="{{ url_for('people.message', username=person.username) }}">{{ csrf() }}
+        <button class="btn btn--block" type="submit"><svg class="icon"><use href="#i-chat"/></svg>{{ t('action.message') }}</button></form>
+    {% elif rel.sent_pending %}
+      <button class="btn btn--secondary btn--block" type="button" disabled>{{ t('action.request_sent') }}</button>
+      <p class="muted center">{{ t('hint.request_pending', name=person.full_name) }}</p>
+    {% else %}
+      <form method="post" action="{{ url_for('people.send_request', username=person.username) }}">{{ csrf() }}
+        <button class="btn btn--block" type="submit"><svg class="icon"><use href="#i-send"/></svg>{{ t('action.send_request') }}</button></form>
+      <p class="muted center">{{ t('hint.request_private', name=person.full_name) }}</p>
+    {% endif %}
+    {% if not is_me %}<a class="muted center" href="{{ url_for('people.report', username=person.username) }}">{{ t('report.link') }}</a>{% endif %}
+  </div>
+</main>
+{% with active='people' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

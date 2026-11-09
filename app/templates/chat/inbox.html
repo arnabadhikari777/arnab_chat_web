@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav.messages') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar"><span class="topbar__title">{{ t('nav.messages') }}</span>
+  <a class="icon-btn" href="{{ url_for('people.index') }}" aria-label="{{ t('nav.people') }}"><svg class="icon"><use href="#i-plus"/></svg></a></header>
+<main class="page page--flush">
+  <div id="chatlist" class="list" aria-live="polite">
+    <div class="list-item"><span class="avatar skeleton"></span><span class="list-item__main"><span class="skeleton w-60"></span></span></div>
+    <div class="list-item"><span class="avatar skeleton"></span><span class="list-item__main"><span class="skeleton w-40"></span></span></div>
+  </div>
+  <div id="chatlist-empty" class="empty hidden">
+    <div class="empty__icon"><svg class="icon"><use href="#i-chat"/></svg></div>
+    <h3>{{ t('empty.chats.title') }}</h3>
+    <p class="muted">{{ t('empty.chats.text') }}</p>
+    <a class="btn" href="{{ url_for('people.index') }}">{{ t('nav.people') }}</a>
+  </div>
+  <div id="chatlist-error" class="banner banner--error hidden">{{ t('toast.network_error') }}</div>
+</main>
+{% with active='messages' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/chatlist.js') }}" defer></script>{% endblock %}

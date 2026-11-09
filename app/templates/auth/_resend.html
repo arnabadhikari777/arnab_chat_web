@@ -1,0 +1,10 @@
+{# needs: resend_url, retry_after #}
+<form method="post" action="{{ resend_url }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn btn--ghost btn--block" type="submit" data-countdown="{{ retry_after }}"
+          data-label-ready="{{ t('auth.verify.resend') }}"
+          data-label-wait="{{ t('auth.verify.resend_in', seconds='{seconds}') }}"
+          {% if retry_after %}disabled{% endif %}>
+    {% if retry_after %}{{ t('auth.verify.resend_in', seconds=retry_after) }}{% else %}{{ t('auth.verify.resend') }}{% endif %}
+  </button>
+</form>

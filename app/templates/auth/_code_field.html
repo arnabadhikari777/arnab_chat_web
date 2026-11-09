@@ -1,0 +1,5 @@
+<div class="field">
+  <label class="field__label" for="code">{{ t('field.otp_code') }}</label>
+  <input class="input input--code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="{{ code_length }}" required autofocus>
+  {% if error %}<span class="field__error" role="alert">{{ t(error[0], **error[1]) }}</span>{% endif %}
+</div>

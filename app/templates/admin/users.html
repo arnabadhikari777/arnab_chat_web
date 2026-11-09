@@ -1,0 +1,25 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import avatar, account_chip with context %}
+{% block content %}
+<form class="stack" method="get" action="{{ url_for('admin.users') }}">
+  <input class="input" type="search" name="q" value="{{ q }}" placeholder="{{ t('admin.users.search') }}" maxlength="60" autocapitalize="none">
+  <select class="input" name="status" aria-label="{{ t('admin.users.status') }}">
+    <option value="">{{ t('admin.users.all') }}</option>
+    {% for st in ['active','suspended','banned'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
+  </select>
+  <button class="btn btn--secondary" type="submit">{{ t('common.search') }}</button>
+</form>
+<div class="list list--flat">
+  {% for u in users %}
+    <a class="list-item" href="{{ url_for('admin.user', user_id=u.id) }}">
+      {{ avatar(u) }}
+      <span class="list-item__main"><span class="list-item__name">{{ u.full_name }}</span><span class="muted">@{{ u.username }}</span></span>
+      <span class="chip {% if u.status != 'active' %}chip--private{% endif %}">{{ t('admin.status.' ~ u.status) }}</span>
+    </a>
+  {% else %}<p class="muted center">{{ t('admin.users.none') }}</p>{% endfor %}
+</div>
+<nav class="pager">
+  {% if page > 1 %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, page=page - 1) }}">{{ t('people.prev') }}</a>{% else %}<span></span>{% endif %}
+  {% if has_next %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, page=page + 1) }}">{{ t('people.next') }}</a>{% endif %}
+</nav>
+{% endblock %}

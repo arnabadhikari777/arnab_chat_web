@@ -1,0 +1,14 @@
+{% extends "auth/layout.html" %}
+{% block title %}{{ t('auth.verify.title') }} - {{ app_name }}{% endblock %}
+{% block heading %}{{ t('auth.verify.title') }}{% endblock %}
+{% block intro %}<p class="muted">{{ t('auth.verify.text', email=email, minutes=minutes) }}</p>{% endblock %}
+{% block content %}
+<form method="post" class="stack" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% include "auth/_code_field.html" %}
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('auth.verify.submit') }}</button>
+</form>
+{% set resend_url = url_for('auth.resend_verification') %}
+{% include "auth/_resend.html" %}
+<p class="muted center"><a href="{{ url_for('auth.login') }}">{{ t('common.back') }}</a></p>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ t('notice.announcement_title') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar">
+  <a class="icon-btn" href="{{ url_for('notices.index') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
+  <span class="topbar__title">{{ t('notice.announcement_title') }}</span>
+</header>
+<main class="page">
+  {% set bn = lang == 'bn' and ann.title_bn %}
+  <h2>{{ ann.title_bn if bn else ann.title }}</h2>
+  <p class="bio">{{ (ann.body_bn or ann.body) if bn else ann.body }}</p>
+  <time class="muted" data-ts="{{ ann.created_at.isoformat() }}Z">{{ ann.created_at.strftime('%Y-%m-%d') }}</time>
+</main>
+{% with active='notices' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

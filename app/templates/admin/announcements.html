@@ -1,0 +1,27 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import err, csrf with context %}
+{% block content %}
+<form method="post" class="stack" novalidate>
+  {{ csrf() }}
+  <h3>{{ t('admin.ann.new') }}</h3>
+  <div class="field"><label class="field__label" for="title">{{ t('admin.ann.title') }} (English)</label>
+    <input class="input" id="title" name="title" maxlength="150" value="{{ form.get('title', '') }}" required>{{ err(errors, 'title') }}</div>
+  <div class="field"><label class="field__label" for="body">{{ t('admin.ann.body') }} (English)</label>
+    <textarea class="input input--area" id="body" name="body" rows="4" maxlength="3000" required>{{ form.get('body', '') }}</textarea>{{ err(errors, 'body') }}</div>
+  <div class="field"><label class="field__label" for="title_bn">{{ t('admin.ann.title') }} (বাংলা)</label>
+    <input class="input" id="title_bn" name="title_bn" maxlength="150" value="{{ form.get('title_bn', '') }}">{{ err(errors, 'title_bn') }}</div>
+  <div class="field"><label class="field__label" for="body_bn">{{ t('admin.ann.body') }} (বাংলা)</label>
+    <textarea class="input input--area" id="body_bn" name="body_bn" rows="4" maxlength="3000">{{ form.get('body_bn', '') }}</textarea>{{ err(errors, 'body_bn') }}</div>
+  <p class="field__hint">{{ t('admin.ann.hint') }}</p>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('admin.ann.send') }}</button>
+</form>
+<h3>{{ t('admin.ann.list') }}</h3>
+{% for a in items %}
+  <article class="card">
+    <strong>{{ a.title }}</strong>
+    <p class="muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ t('admin.ann.active') if a.is_active else t('admin.ann.inactive') }}</p>
+    <form method="post" action="{{ url_for('admin.announcement_toggle', announcement_id=a.id) }}">{{ csrf() }}
+      <button class="btn btn--secondary" type="submit">{{ t('admin.ann.deactivate') if a.is_active else t('admin.ann.activate') }}</button></form>
+  </article>
+{% else %}<p class="muted center">{{ t('admin.ann.none') }}</p>{% endfor %}
+{% endblock %}

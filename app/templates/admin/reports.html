@@ -1,0 +1,21 @@
+{% extends "admin/layout.html" %}
+{% block content %}
+<form method="get" class="row">
+  <select class="input" name="status" aria-label="{{ t('admin.users.status') }}">
+    <option value="">{{ t('admin.users.all') }}</option>
+    {% for st in ['open','reviewing','resolved','dismissed'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ t('admin.report.' ~ st) }}</option>{% endfor %}
+  </select>
+  <button class="btn btn--secondary" type="submit">{{ t('common.search') }}</button>
+</form>
+{% for r in reports %}
+  <a class="card card--link" href="{{ url_for('admin.report', report_id=r.id) }}">
+    <strong>@{{ users[r.reported_user_id].username }}</strong>
+    <span class="muted">{{ t('report.reason.' ~ r.reason) }} · {{ t('admin.report.' ~ r.status) }}</span>
+    <span class="muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>
+  </a>
+{% else %}<p class="muted center">{{ t('admin.report.none') }}</p>{% endfor %}
+<nav class="pager">
+  {% if page > 1 %}<a class="btn btn--secondary" href="{{ url_for('admin.reports', status=status or None, page=page - 1) }}">{{ t('people.prev') }}</a>{% else %}<span></span>{% endif %}
+  {% if has_next %}<a class="btn btn--secondary" href="{{ url_for('admin.reports', status=status or None, page=page + 1) }}">{{ t('people.next') }}</a>{% endif %}
+</nav>
+{% endblock %}

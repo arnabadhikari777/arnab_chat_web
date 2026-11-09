@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import avatar with context %}
+{% block title %}{{ other.full_name }} - {{ app_name }}{% endblock %}
+{% block app %}
+<div class="chat-screen" id="chat"
+     data-conversation="{{ conversation.id }}" data-max-chars="{{ max_chars }}" data-max-voice="{{ max_voice }}"
+     data-max-image="{{ max_bytes.image }}" data-max-video="{{ max_bytes.video }}" data-max-document="{{ max_bytes.document }}"
+     data-max-file="{{ max_bytes.file }}" data-max-voice-bytes="{{ max_bytes.voice }}">
+  <header class="topbar">
+    <a class="icon-btn" href="{{ url_for('chat.inbox') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
+    <a class="chat-head" href="{{ url_for('people.profile', username=other.username) }}">
+      {{ avatar(other, 'avatar--sm') }}
+      <span class="chat-head__text"><strong>{{ other.full_name }}</strong><span class="muted" id="peer-status">&nbsp;</span></span>
+    </a>
+  </header>
+
+  <div class="chat-scroll chat-bg" id="chat-scroll">
+    <button class="btn btn--ghost hidden" id="load-older" type="button">{{ t('chat.load_older') }}</button>
+    <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+    <div id="chat-empty" class="empty hidden"><p class="muted">{{ t('chat.say_hello') }}</p></div>
+  </div>
+  <div class="banner banner--error hidden" id="chat-offline">{{ t('toast.network_error') }}</div>
+
+  <div id="emoji-panel" class="emoji-panel hidden" role="group" aria-label="{{ t('chat.emoji') }}"></div>
+
+  <form class="composer" id="composer" autocomplete="off">
+    <div class="composer__row" id="composer-default">
+      <button class="icon-btn" type="button" id="btn-attach" aria-label="{{ t('chat.attach') }}"><svg class="icon"><use href="#i-clip"/></svg></button>
+      <button class="icon-btn" type="button" id="btn-emoji" aria-label="{{ t('chat.emoji') }}"><svg class="icon"><use href="#i-smile"/></svg></button>
+      <textarea class="input" id="msg-input" rows="1" maxlength="{{ max_chars }}" placeholder="{{ t('chat.type_message') }}" aria-label="{{ t('chat.type_message') }}"></textarea>
+      <button class="icon-btn icon-btn--primary hidden" type="submit" id="btn-send" aria-label="{{ t('common.send') }}"><svg class="icon"><use href="#i-send"/></svg></button>
+      <button class="icon-btn icon-btn--primary" type="button" id="btn-mic" aria-label="{{ t('chat.record_voice') }}"><svg class="icon"><use href="#i-mic"/></svg></button>
+    </div>
+
+    <div class="composer__row hidden" id="composer-voice">
+      <button class="icon-btn" type="button" id="vr-delete" aria-label="{{ t('chat.voice_delete') }}"><svg class="icon"><use href="#i-trash"/></svg></button>
+      <div class="vr-body" id="vr-recording">
+        <span class="vr-dot" id="vr-dot"></span><span class="vr-time" id="vr-time">0:00</span>
+        <span class="muted" id="vr-state">{{ t('chat.recording') }}</span>
+      </div>
+      <div class="vr-body hidden" id="vr-preview">
+        <button class="icon-btn" type="button" id="vr-play" aria-label="{{ t('chat.voice_play') }}"><svg class="icon"><use href="#i-play"/></svg></button>
+        <input class="vr-seek" type="range" id="vr-seek" min="0" max="100" value="0" aria-label="{{ t('chat.voice_seek') }}">
+        <span class="vr-time" id="vr-preview-time">0:00</span>
+      </div>
+      <button class="icon-btn" type="button" id="vr-pause" aria-label="{{ t('chat.voice_pause') }}"><svg class="icon"><use href="#i-pause"/></svg></button>
+      <button class="icon-btn" type="button" id="vr-stop" aria-label="{{ t('chat.voice_stop') }}"><svg class="icon"><use href="#i-stop"/></svg></button>
+      <button class="icon-btn icon-btn--primary hidden" type="button" id="vr-send" aria-label="{{ t('chat.voice_send') }}"><svg class="icon"><use href="#i-send"/></svg></button>
+    </div>
+  </form>
+
+  <input class="sr-only" type="file" id="file-media" accept="image/*,video/*" tabindex="-1">
+  <input class="sr-only" type="file" id="file-doc" tabindex="-1">
+  <div id="attach-menu" class="attach-menu hidden">
+    <button class="btn btn--secondary" type="button" data-attach="media"><svg class="icon"><use href="#i-photo"/></svg>{{ t('chat.attach_media') }}</button>
+    <button class="btn btn--secondary" type="button" data-attach="doc"><svg class="icon"><use href="#i-file"/></svg>{{ t('chat.attach_file') }}</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/voice.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}" defer></script>
+{% endblock %}

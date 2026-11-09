@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - {{ app_name }}{% endblock %}
+{% block app %}
+<main class="page">
+  <div class="empty">
+    <div class="empty__icon"><svg class="icon"><use href="#i-close"/></svg></div>
+    <h2>{{ title }}</h2>
+    <p class="muted">{{ message }}</p>
+    <a class="btn" href="{{ url_for('main.home') }}">{{ t('common.home') }}</a>
+  </div>
+</main>
+{% endblock %}

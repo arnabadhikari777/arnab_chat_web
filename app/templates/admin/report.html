@@ -1,0 +1,21 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import csrf with context %}
+{% block content %}
+<h2>{{ t('admin.report.title') }} #{{ r.id }}</h2>
+<dl class="facts">
+  <dt>{{ t('admin.report.reported') }}</dt><dd><a href="{{ url_for('admin.user', user_id=reported.id) }}">@{{ reported.username }}</a></dd>
+  <dt>{{ t('admin.report.reporter') }}</dt><dd><a href="{{ url_for('admin.user', user_id=reporter.id) }}">@{{ reporter.username }}</a></dd>
+  <dt>{{ t('report.reason') }}</dt><dd>{{ t('report.reason.' ~ r.reason) }}</dd>
+  <dt>{{ t('report.details') }}</dt><dd class="bio">{{ r.details or '-' }}</dd>
+  <dt>{{ t('admin.user.status') }}</dt><dd>{{ t('admin.report.' ~ r.status) }}</dd>
+  <dt>{{ t('admin.user.joined') }}</dt><dd>{{ r.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
+</dl>
+<form method="post" action="{{ url_for('admin.report_status', report_id=r.id) }}" class="stack">
+  {{ csrf() }}
+  <select class="input" name="status" aria-label="{{ t('admin.user.status') }}">
+    {% for st in ['open','reviewing','resolved','dismissed'] %}<option value="{{ st }}" {% if r.status == st %}selected{% endif %}>{{ t('admin.report.' ~ st) }}</option>{% endfor %}
+  </select>
+  <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
+</form>
+<a class="btn btn--secondary btn--block" href="{{ url_for('admin.user', user_id=reported.id) }}">{{ t('admin.report.open_user') }}</a>
+{% endblock %}

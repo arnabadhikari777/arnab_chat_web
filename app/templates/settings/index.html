@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import err, flashes, csrf with context %}
+{% block title %}{{ t('nav.settings') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar"><span class="topbar__title">{{ t('nav.settings') }}</span></header>
+<main class="page">
+  {{ flashes() }}
+  <section class="stack">
+    <h3>{{ t('settings.account') }}</h3>
+    <a class="btn btn--secondary btn--block" href="{{ url_for('settings.edit_profile') }}"><svg class="icon"><use href="#i-user"/></svg>{{ t('profile.edit') }}</a>
+    <a class="btn btn--secondary btn--block" href="{{ url_for('settings.password') }}"><svg class="icon"><use href="#i-lock"/></svg>{{ t('settings.password') }}</a>
+  </section>
+
+  <section>
+    <form method="post" action="{{ url_for('settings.privacy') }}" class="stack">
+      {{ csrf() }}
+      <fieldset class="choice-group">
+        <legend><h3>{{ t('settings.privacy') }}</h3></legend>
+        <p class="muted">{{ t('settings.privacy_text') }}</p>
+        <label class="choice">
+          <input type="radio" name="account_type" value="public" {% if current_user.is_public %}checked{% endif %}>
+          <span class="choice__body"><strong>{{ t('account.public') }}</strong><span class="field__hint">{{ t('hint.account_public') }}</span></span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="account_type" value="private" {% if not current_user.is_public %}checked{% endif %}>
+          <span class="choice__body"><strong>{{ t('account.private') }}</strong><span class="field__hint">{{ t('hint.account_private') }}</span></span>
+        </label>
+        {{ err(errors, 'account_type') }}
+      </fieldset>
+      <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('common.save') }}</button>
+    </form>
+  </section>
+
+  <section>
+    <form method="post" action="{{ url_for('settings.notifications') }}" class="stack">
+      {{ csrf() }}
+      <h3>{{ t('settings.notifications') }}</h3>
+      <label class="choice"><input type="checkbox" name="notify_messages" {% if current_user.notify_messages %}checked{% endif %}>
+        <span class="choice__body"><strong>{{ t('settings.notify_messages') }}</strong></span></label>
+      <label class="choice"><input type="checkbox" name="notify_announcements" {% if current_user.notify_announcements %}checked{% endif %}>
+        <span class="choice__body"><strong>{{ t('settings.notify_announcements') }}</strong></span></label>
+      <p class="field__hint">{{ t('settings.notify_hint') }}</p>
+      <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
+    </form>
+  </section>
+
+  <section class="stack">
+    <h3>{{ t('settings.language') }}</h3>
+    <nav class="lang-switch lang-switch--wide" aria-label="Language">
+      <a href="{{ url_for('main.set_language', code='en', next=url_for('settings.index')) }}" {% if lang == 'en' %}aria-current="true"{% endif %}>{{ t('lang.en') }}</a>
+      <a href="{{ url_for('main.set_language', code='bn', next=url_for('settings.index')) }}" {% if lang == 'bn' %}aria-current="true"{% endif %}>{{ t('lang.bn') }}</a>
+    </nav>
+  </section>
+  <form method="post" action="{{ url_for('auth.logout') }}">
+    {{ csrf() }}
+    <button class="btn btn--ghost btn--block" type="submit"><svg class="icon"><use href="#i-logout"/></svg>{{ t('nav.logout') }}</button>
+  </form>
+</main>
+{% with active='settings' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

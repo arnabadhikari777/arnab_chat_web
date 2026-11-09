@@ -1,0 +1,28 @@
+{% extends "auth/layout.html" %}
+{% from "partials/macros.html" import err with context %}
+{% block title %}{{ t('auth.reset.title') }} - {{ app_name }}{% endblock %}
+{% block heading %}{{ t('auth.reset.title') }}{% endblock %}
+{% block intro %}<p class="muted">{{ t('auth.reset.text', email=email, minutes=minutes) }}</p>{% endblock %}
+{% block content %}
+<form method="post" class="stack" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% include "auth/_code_field.html" %}
+  <div class="field">
+    <label class="field__label" for="password">{{ t('field.new_password') }}</label>
+    <div class="input-wrap">
+      <input class="input" id="password" name="password" type="password" autocomplete="new-password" required {% if errors.get('password') %}aria-invalid="true"{% endif %}>
+      <button class="icon-btn" type="button" data-toggle-password="password" aria-label="{{ t('common.show_password') }}"><svg class="icon"><use href="#i-eye"/></svg></button>
+    </div>
+    <span class="field__hint">{{ t('hint.password') }}</span>
+    {{ err(errors, 'password') }}
+  </div>
+  <div class="field">
+    <label class="field__label" for="confirm_password">{{ t('field.confirm_password') }}</label>
+    <input class="input" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required {% if errors.get('confirm_password') %}aria-invalid="true"{% endif %}>
+    {{ err(errors, 'confirm_password') }}
+  </div>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('auth.reset.submit') }}</button>
+</form>
+{% set resend_url = url_for('auth.resend_reset') %}
+{% include "auth/_resend.html" %}
+{% endblock %}

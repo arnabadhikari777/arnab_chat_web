@@ -1,0 +1,55 @@
+/* Design tokens. Light mode only. Change a value here and the whole app follows. */
+:root {
+  /* colour */
+  --c-bg: #f3f6f8;
+  --c-surface: #ffffff;
+  --c-ink: #13202b;
+  --c-ink-2: #44566a;
+  --c-ink-3: #75869a;
+  --c-line: #e0e6ec;
+  --c-primary: #0b6e78;
+  --c-primary-press: #095962;
+  --c-primary-ink: #ffffff;
+  --c-primary-soft: #dcf0f1;
+  --c-bubble-out: #cdeae7;
+  --c-bubble-in: #ffffff;
+  --c-danger: #b42318;
+  --c-danger-soft: #fdecea;
+  --c-success: #17794a;
+  --c-success-soft: #e3f5ec;
+  --c-warn: #a9500b;
+  --c-warn-soft: #fdf1e3;
+  --c-seen: #1d7aea;
+  --c-online: #2fb35a;
+  --c-focus: #1d7aea;
+
+  /* type */
+  --font: "Figtree", "Hind Siliguri", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.375rem;
+  --fs-2xl: 1.75rem;
+
+  /* space (4px grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  /* shape: different radii for different jobs */
+  --r-control: 12px;
+  --r-card: 16px;
+  --r-bubble: 18px;
+  --r-bubble-tail: 5px;
+  --r-sheet: 22px;
+  --r-pill: 999px;
+
+  --touch: 44px;
+  --shadow-float: 0 8px 28px rgba(19, 32, 43, 0.18);
+  --topbar-h: 56px;
+  --nav-h: 64px;
+}

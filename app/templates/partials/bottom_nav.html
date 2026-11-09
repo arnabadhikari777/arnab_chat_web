@@ -1,0 +1,8 @@
+{# `active` = messages | people | notices | home | settings #}
+<nav class="bottom-nav" aria-label="Main">
+  <a href="{{ url_for('chat.inbox') }}" {% if active == 'messages' %}aria-current="page"{% endif %}><span class="nav-icon"><svg class="icon"><use href="#i-chat"/></svg><span class="nav-badge hidden" data-badge="messages"></span></span>{{ t('nav.messages') }}</a>
+  <a href="{{ url_for('people.index') }}" {% if active == 'people' %}aria-current="page"{% endif %}><span class="nav-icon"><svg class="icon"><use href="#i-people"/></svg></span>{{ t('nav.people') }}</a>
+  <a href="{{ url_for('notices.index') }}" {% if active == 'notices' %}aria-current="page"{% endif %}><span class="nav-icon"><svg class="icon"><use href="#i-bell"/></svg><span class="nav-badge hidden" data-badge="notices"></span></span>{{ t('nav.notices') }}</a>
+  <a href="{{ url_for('main.home') }}" {% if active == 'home' %}aria-current="page"{% endif %}><span class="nav-icon"><svg class="icon"><use href="#i-user"/></svg></span>{{ t('nav.profile') }}</a>
+  <a href="{{ url_for('settings.index') }}" {% if active == 'settings' %}aria-current="page"{% endif %}><span class="nav-icon"><svg class="icon"><use href="#i-settings"/></svg></span>{{ t('nav.settings') }}</a>
+</nav>

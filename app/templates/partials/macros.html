@@ -1,0 +1,43 @@
+{# Import with:  {% from "partials/macros.html" import avatar, err, flashes with context %} #}
+
+{% macro avatar(user, size='') %}
+  <span class="avatar avatar--{{ 'abcde'[user.id % 5] }} {{ size }}">
+    {% if user.avatar_url %}<img src="{{ user.avatar_url }}" alt="" loading="lazy">
+    {% else %}{{ user.full_name[:1]|upper }}{% endif %}
+  </span>
+{% endmacro %}
+
+{% macro err(errors, name) %}
+  {% if errors and errors.get(name) %}
+    <span class="field__error" role="alert">{{ t(errors[name][0], **errors[name][1]) }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro flashes() %}
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="banner banner--{{ 'error' if category == 'error' else 'success' }}" role="status">
+      {% if message is string %}{{ t(message) }}{% else %}{{ t(message[0], **message[1]) }}{% endif %}
+    </div>
+  {% endfor %}
+{% endmacro %}
+
+{% macro account_chip(user) %}
+  {% if user.is_public %}
+    <span class="chip">{{ t('account.public') }}</span>
+  {% else %}
+    <span class="chip chip--private"><svg class="icon icon--sm"><use href="#i-lock"/></svg>{{ t('account.private') }}</span>
+  {% endif %}
+{% endmacro %}
+
+{% macro person_row(user) %}
+  <a class="list-item" href="{{ url_for('people.profile', username=user.username) }}">
+    {{ avatar(user) }}
+    <span class="list-item__main">
+      <span class="list-item__name">{{ user.full_name }}</span>
+      <span class="muted">@{{ user.username }}</span>
+    </span>
+    {{ account_chip(user) }}
+  </a>
+{% endmacro %}
+
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}

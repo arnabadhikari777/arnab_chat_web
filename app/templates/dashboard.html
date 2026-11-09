@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import avatar, account_chip, flashes, csrf with context %}
+{% block app %}
+<header class="topbar"><span class="topbar__title">{{ app_name }}</span></header>
+<main class="page">
+  {{ flashes() }}
+  <section class="profile-card">
+    {{ avatar(current_user, 'avatar--lg') }}
+    <div class="stack stack--tight">
+      <h2>{{ current_user.full_name }}</h2>
+      <span class="muted">@{{ current_user.username }}</span>
+      {{ account_chip(current_user) }}
+    </div>
+  </section>
+  {% if current_user.bio %}<p class="bio">{{ current_user.bio }}</p>{% endif %}
+  <a class="btn btn--secondary btn--block" href="{{ url_for('settings.edit_profile') }}">{{ t('profile.edit') }}</a>
+  <div class="tiles">
+    <a class="tile" href="{{ url_for('chat.inbox') }}"><svg class="icon"><use href="#i-chat"/></svg>{{ t('nav.messages') }}<span class="badge hidden" data-badge="messages"></span></a>
+    <a class="tile" href="{{ url_for('people.index') }}"><svg class="icon"><use href="#i-people"/></svg>{{ t('nav.people') }}</a>
+    <a class="tile" href="{{ url_for('notices.index') }}"><svg class="icon"><use href="#i-bell"/></svg>{{ t('nav.notices') }}<span class="badge hidden" data-badge="notices"></span></a>
+    <a class="tile" href="{{ url_for('settings.index') }}"><svg class="icon"><use href="#i-settings"/></svg>{{ t('nav.settings') }}</a>
+  </div>
+  {% if current_user.is_admin %}<a class="btn btn--block" href="{{ url_for('admin.dashboard') }}"><svg class="icon"><use href="#i-shield"/></svg>{{ t('admin.title') }}</a>{% endif %}
+  <form method="post" action="{{ url_for('auth.logout') }}">
+    {{ csrf() }}
+    <button class="btn btn--ghost btn--block" type="submit"><svg class="icon"><use href="#i-logout"/></svg>{{ t('nav.logout') }}</button>
+  </form>
+</main>
+{% with active='home' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block app %}
+<header class="topbar"><span class="topbar__title">{{ app_name }}</span></header>
+<main class="page">
+  <div class="empty">
+    <div class="empty__icon"><svg class="icon"><use href="#i-chat"/></svg></div>
+    <h2>{{ t('home.title') }}</h2>
+    <p class="muted">{{ t('home.text') }}</p>
+    {% if config.APP_ENV != 'production' %}
+      <a class="btn btn--secondary" href="{{ url_for('main.design_system') }}">Design system</a>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

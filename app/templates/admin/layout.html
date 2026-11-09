@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import flashes with context %}
+{% block title %}{{ t('admin.title') }} - {{ app_name }}{% endblock %}
+{% block app %}
+<header class="topbar">
+  <a class="icon-btn" href="{{ url_for('main.home') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
+  <span class="topbar__title">{{ t('admin.title') }}</span>
+</header>
+<nav class="admin-nav" aria-label="Admin">
+  {% for key, endpoint in [('dashboard','admin.dashboard'),('users','admin.users'),('reports','admin.reports'),('announcements','admin.announcements'),('audit','admin.audit')] %}
+    <a href="{{ url_for(endpoint) }}" {% if section == key %}aria-current="page"{% endif %}>{{ t('admin.nav.' ~ key) }}</a>
+  {% endfor %}
+</nav>
+<main class="page">
+  {{ flashes() }}
+  {% block content %}{% endblock %}
+</main>
+{% endblock %}

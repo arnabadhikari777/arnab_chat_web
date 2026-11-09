@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% from "partials/macros.html" import flashes with context %}
+{% block app %}
+<header class="topbar">
+  <span class="topbar__title">{{ app_name }}</span>
+  <nav class="lang-switch" aria-label="Language">
+    <a href="{{ url_for('main.set_language', code='en', next=request.path) }}" {% if lang == 'en' %}aria-current="true"{% endif %}>{{ t('lang.en') }}</a>
+    <a href="{{ url_for('main.set_language', code='bn', next=request.path) }}" {% if lang == 'bn' %}aria-current="true"{% endif %}>{{ t('lang.bn') }}</a>
+  </nav>
+</header>
+<main class="page">
+  <div class="stack">
+    <h1>{% block heading %}{% endblock %}</h1>
+    {% block intro %}{% endblock %}
+  </div>
+  {{ flashes() }}
+  {% block content %}{% endblock %}
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/auth.js') }}" defer></script>{% endblock %}
