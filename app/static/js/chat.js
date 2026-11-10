@@ -375,7 +375,23 @@
     clearTimeout(state.typingTimer);
     state.typingTimer = setTimeout(() => { state.typingAt = 0; typing(false); }, 4000);
   });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $("composer").requestSubmit(); } });
+  /* Computer: Enter sends, Shift+Enter makes a new line. Phone/tablet (touch): Enter stays a new line,
+     the send button is used. Ctrl/Cmd+Enter always sends. */
+  const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+    if (e.ctrlKey || e.metaKey || (!e.shiftKey && !isTouch)) { e.preventDefault(); $("composer").requestSubmit(); }
+  });
+
+  /* Keep the whole chat (and the typing box) inside the visible screen when the keyboard opens. */
+  const vv = window.visualViewport;
+  function fitScreen() {
+    if (!vv) return;
+    root.style.setProperty("--vvh", Math.round(vv.height) + "px");
+    window.scrollTo(0, 0);
+    scroller.scrollTop = scroller.scrollHeight;
+  }
+  if (vv) { vv.addEventListener("resize", fitScreen); vv.addEventListener("scroll", () => window.scrollTo(0, 0)); }
   $("composer").addEventListener("submit", (e) => {
     e.preventDefault();
     const text = input.value.trim();

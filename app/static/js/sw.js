@@ -1,5 +1,5 @@
 /* Goppo service worker – basic offline shell + cache of static assets */
-const CACHE = "goppo-v1";
+const CACHE = "goppo-v2";
 const PRECACHE = [
   "/",
   "/static/css/tokens.css",
@@ -29,15 +29,14 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
-  // Network-first for API / dynamic; cache-first for static
+  // Static files: network-first (so a phone never keeps showing an old, buggy CSS/JS), cache only when offline
   const url = new URL(req.url);
   if (url.pathname.startsWith("/static/") || url.pathname.endsWith(".webmanifest")) {
     event.respondWith(
-      caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(req, copy));
+      fetch(req).then((res) => {
+        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
-      }))
+      }).catch(() => caches.match(req))
     );
     return;
   }
