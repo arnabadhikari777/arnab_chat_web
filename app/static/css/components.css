@@ -186,7 +186,19 @@ dialog.dialog::backdrop { background: rgba(19, 32, 43, 0.45); }
 .peer--online { color: var(--c-success); }
 
 /* ---------- chat screen: full height, composer pinned at the bottom ---------- */
-.chat-screen { display: flex; flex-direction: column; height: 100vh; height: 100dvh; background: var(--c-surface); }
+.chat-screen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--c-surface);
+}
+.chat-screen > .topbar { flex: 0 0 auto; }
+.chat-screen > .chat-scroll { flex: 1 1 auto; min-height: 0; width: 100%; }
+.chat-screen > .composer { flex: 0 0 auto; width: 100%; min-width: 0; position: relative; z-index: 5; }
 .chat-head { display: flex; align-items: center; gap: var(--s-2); flex: 1; min-width: 0; text-decoration: none; color: inherit; }
 .chat-head__text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .chat-head__text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -220,9 +232,25 @@ progress.upload { width: 100%; height: 6px; margin-top: var(--s-1); accent-color
 .lightbox img { max-width: 96vw; max-height: 90vh; border-radius: 8px; }
 
 /* composer */
-.composer { display: block; padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom)); }
-.composer__row { display: flex; align-items: flex-end; gap: var(--s-1); }
-.composer textarea.input { flex: 1; resize: none; max-height: 130px; line-height: 1.4; padding-top: 10px; }
+.composer {
+  display: block;
+  flex-shrink: 0;
+  margin: 0;
+  padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom));
+  padding-bottom: max(var(--s-2), env(safe-area-inset-bottom));
+  background: var(--c-surface);
+}
+.composer__row { display: flex; align-items: flex-end; gap: var(--s-1); width: 100%; min-width: 0; }
+.composer textarea.input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  resize: none;
+  max-height: 130px;
+  line-height: 1.4;
+  padding-top: 10px;
+  overflow-y: auto;
+}
 .vr-body { flex: 1; display: flex; align-items: center; gap: var(--s-2); min-height: var(--touch); }
 .vr-dot { width: 12px; height: 12px; border-radius: var(--r-pill); background: var(--c-danger); }
 .vr-dot--live { animation: pulse 1s infinite; }
@@ -259,3 +287,12 @@ progress.upload { width: 100%; height: 6px; margin-top: var(--s-1); accent-color
   border-radius: var(--r-card); color: inherit; }
 .card--link { text-decoration: none; }
 .list--flat { border-top: 1px solid var(--c-line); }
+
+
+/* Chat composer layout safeguards: keep the message field visible on narrow screens
+   and prevent the scroll area from pushing the composer below the viewport. */
+@media (max-width: 520px) {
+  .chat-screen { height: 100vh; height: 100dvh; }
+  .chat-screen > .composer { padding-left: max(var(--s-2), env(safe-area-inset-left)); padding-right: max(var(--s-2), env(safe-area-inset-right)); }
+  .composer__row > .icon-btn { flex: 0 0 var(--touch); }
+}
