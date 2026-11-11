@@ -1,7 +1,7 @@
 """JSON endpoints used by the chat pages. Every one checks the person is in the conversation."""
 from datetime import datetime
 
-from flask import abort, g, jsonify, request, session
+from flask import abort, current_app, g, jsonify, request, session
 from flask_login import current_user
 
 from ...extensions import db, limiter
@@ -205,7 +205,7 @@ def push_vapid_key():
 
 @bp.post("/api/push/subscribe")
 @auth_required
-@limiter.limit("30 per hour")
+@limiter.limit("60 per hour")
 def push_subscribe():
     """Save (or refresh) this browser's subscription. Safe to call again: the same endpoint is never stored twice."""
     from ...services import push_service
@@ -221,6 +221,10 @@ def push_subscribe():
             str(keys.get("auth") or ""), (request.headers.get("User-Agent") or "")[:300])
     except ValueError:
         return _push_error("save_failed")
+    except Exception:  # noqa: BLE001 - database or code problem: log the real traceback, answer with JSON
+        db.session.rollback()
+        current_app.logger.exception("push subscribe failed")
+        return _push_error("server_error", 500)
     session["push_sub_id"] = sub.id           # lets logout remove exactly this browser
     return jsonify({"ok": True, "id": sub.id})
 

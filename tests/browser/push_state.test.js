@@ -112,3 +112,12 @@ test("a server refusal while saving is reported as save_failed, not as a configu
     url.endsWith("/config") ? { ok: true, data: { configured: true, publicKey: KEY } } : { ok: false, status: 400 } });
   assert.equal((await appPush.subscribe()).error, "save_failed");
 });
+
+for (const [status, expected] of [[403, "forbidden"], [429, "rate_limited"], [500, "server_error"], [401, "session"], [0, "network"]]) {
+  test(`saving fails with HTTP ${status} -> reported as ${expected} (with the status kept for the screen)`, async () => {
+    const { appPush } = supportedBrowser({ permission: "granted", api: async (url) =>
+      url.endsWith("/config") ? { ok: true, data: { configured: true, publicKey: KEY } } : { ok: false, status } });
+    const res = await appPush.subscribe();
+    assert.equal(res.error, expected); assert.equal(res.status, status);
+  });
+}

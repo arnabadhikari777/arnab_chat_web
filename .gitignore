@@ -6,6 +6,8 @@
 .venv
 .git
 chat.db
+docs
+.md
 
 # ============ Live data (stays on the server) ============
 database.db

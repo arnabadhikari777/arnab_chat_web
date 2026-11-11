@@ -70,3 +70,62 @@ def register_cli(app) -> None:
         for problem in st.problems:
             click.echo(f"PROBLEM  {problem}")
         click.echo("Fix .env, reload the web app, then run this again. New keys: flask generate-vapid-keys")
+
+    @app.cli.command("push-selfcheck")
+    def push_selfcheck():
+        """Test every server-side step of Web Push and print the exact failure (run on PythonAnywhere)."""
+        import time
+        from importlib import metadata
+
+        from sqlalchemy import inspect
+
+        from .extensions import db
+        from .models import PushDelivery, PushSubscription, User
+        from .services import push_service
+
+        def ok(msg): click.echo(f"OK      {msg}")
+        def bad(msg): click.echo(f"PROBLEM {msg}")
+
+        st = push_service.vapid_status()
+        if st.configured:
+            ok("VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY and VAPID_CONTACT are valid and match")
+        else:
+            for n in st.missing: bad(f"{n} is missing in .env")
+            for pr in st.problems: bad(pr)
+        try:
+            ok("pywebpush " + metadata.version("pywebpush"))
+        except Exception as exc:  # noqa: BLE001
+            bad(f"pywebpush is not installed in this virtualenv ({exc}). Run: pip install -r requirements.txt")
+        if st.configured:
+            try:
+                from py_vapid import Vapid
+                Vapid.from_string(private_key=st.private_raw).sign(
+                    {"sub": st.contact, "aud": "https://fcm.googleapis.com", "exp": int(time.time()) + 3600})
+                ok("a VAPID signature can be created with your private key")
+            except Exception as exc:  # noqa: BLE001
+                bad(f"signing failed: {exc.__class__.__name__}: {exc}")
+        insp = inspect(db.engine)
+        for model in (PushSubscription, PushDelivery):
+            table = model.__table__.name
+            if table not in insp.get_table_names():
+                bad(f"table {table} does not exist in the database. Run: flask db upgrade")
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            missing = [c.name for c in model.__table__.columns if c.name not in have]
+            if missing:
+                bad(f"table {table} lacks columns {missing}. Run: flask db upgrade")
+            else:
+                ok(f"table {table} has every column")
+        user = User.query.first()
+        if user is None:
+            bad("no users in the database to test with")
+            return
+        try:
+            row = PushSubscription(user_id=user.id, endpoint="https://selfcheck.invalid/x", p256dh="p", auth="a", status="active")
+            db.session.add(row)
+            db.session.flush()
+            ok("a subscription row can be written (this test row is rolled back, nothing is kept)")
+        except Exception as exc:  # noqa: BLE001
+            bad(f"writing a subscription row failed: {exc.__class__.__name__}: {exc}")
+        finally:
+            db.session.rollback()

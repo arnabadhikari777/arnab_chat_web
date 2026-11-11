@@ -348,5 +348,8 @@
   "push.err.subscribe_failed": "This browser couldn't register for push. Make sure you are online and the browser's push service is available, then try again.",
   "push.err.save_failed": "Your device registered, but the server couldn't save it. Please try again.",
   "push.err.server_not_configured": "Push notifications aren't set up on this server yet.",
-  "push.err.session": "Your session expired. Please sign in again."
+  "push.err.session": "Your session expired. Please sign in again.",
+  "push.err.forbidden": "The security check failed. Reload the page and try again.",
+  "push.err.rate_limited": "Too many attempts. Wait a few minutes and try again.",
+  "push.err.server_error": "The server hit an error while saving this device. The site owner can see the details in the server error log."
 }

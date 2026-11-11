@@ -85,10 +85,14 @@
       method: "POST", json: { endpoint: json.endpoint, keys: json.keys },
     });
     if (res.ok) return { ok: true };
-    if (res.status === 0) return { ok: false, error: "network" };
-    if (res.status === 401) return { ok: false, error: "session" };
-    if (res.status === 503) return { ok: false, error: "server_not_configured" };
-    return { ok: false, error: "save_failed" };
+    const fail = (error) => ({ ok: false, error, status: res.status });
+    if (res.status === 0) return fail("network");
+    if (res.status === 401) return fail("session");
+    if (res.status === 403) return fail("forbidden");        // usually an expired CSRF token: reload fixes it
+    if (res.status === 429) return fail("rate_limited");
+    if (res.status === 503) return fail("server_not_configured");
+    if (res.status >= 500) return fail("server_error");
+    return fail("save_failed");
   }
 
   /* ---------------------------------------------------------------- the decision (pure, easy to test) */
@@ -201,8 +205,10 @@
     if (hint) {
       const hintKey = { denied: "push.denied_help", ios_install: "push.ios_install_help", granted: "push.granted_help",
                         sw_failed: "push.sw_failed_help", server_not_configured: "push.server_not_configured_help" }[state.code];
-      hint.textContent = hintKey ? T(hintKey) : "";
-      setVisible(hint, !!hintKey);
+      const text = [hintKey ? T(hintKey) : "", state.code === "granted" || state.code === "off" ? lastFailure : ""]
+        .filter(Boolean).join(" ");
+      hint.textContent = text;
+      setVisible(hint, !!text);
     }
     const admin = el("[data-push-admin]");
     if (admin) {
@@ -222,8 +228,10 @@
     unsupported: "push.state.unsupported", denied: "push.state.denied", dismissed: "push.err.dismissed",
     server_not_configured: "push.state.server_not_configured", sw_unavailable: "push.state.sw_failed",
     subscribe_failed: "push.err.subscribe_failed", save_failed: "push.err.save_failed",
-    network: "toast.network_error", session: "push.err.session",
+    network: "toast.network_error", session: "push.err.session", forbidden: "push.err.forbidden",
+    rate_limited: "push.err.rate_limited", server_error: "push.err.server_error",
   };
+  let lastFailure = "";                              // stays on screen (a toast disappears after 3 seconds)
 
   document.addEventListener("click", async (e) => {
     const enable = e.target.closest("[data-push-enable]");
@@ -240,8 +248,10 @@
       } else if (res.error === "dismissed") {
         window.app.toast(T(ERROR_TEXT.dismissed));       // neutral, not an error
       } else if (res.error !== "denied" && res.error !== "server_not_configured" && res.error !== "unsupported") {
-        window.app.toast(T(ERROR_TEXT[res.error] || "toast.something_wrong"), "error");   // real failures only
+        lastFailure = T(ERROR_TEXT[res.error] || "toast.something_wrong") + (res.status ? " [HTTP " + res.status + "]" : "");
+        window.app.toast(lastFailure, "error");          // real failures only
       }
+      if (res.ok) lastFailure = "";
       renderSettingsUI({ reloadConfig: true });          // denied / not configured are explained in the card itself
     }
     if (disable) {
