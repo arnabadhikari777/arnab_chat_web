@@ -101,3 +101,6 @@ class MessageDeletion(db.Model):
         db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     deleted_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    # "which messages did this user hide?" runs inside every history / unread query
+    __table_args__ = (db.Index("ix_message_deletions_user_id", "user_id"),)

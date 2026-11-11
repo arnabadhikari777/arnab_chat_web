@@ -1,4 +1,4 @@
-from flask import abort, current_app, jsonify, redirect, render_template, request, url_for
+from flask import abort, current_app, jsonify, make_response, redirect, render_template, request, send_from_directory, url_for
 from flask_login import current_user
 from sqlalchemy import text
 
@@ -54,3 +54,13 @@ def design_system():
     if current_app.config.get("APP_ENV") == "production":
         abort(404)
     return render_template("design.html")
+
+
+@bp.get("/sw.js")
+def service_worker():
+    """The service worker is served from the site root so it can control every page (scope "/")."""
+    response = make_response(send_from_directory(
+        current_app.static_folder + "/js", "sw.js", mimetype="application/javascript"))
+    response.headers["Cache-Control"] = "no-cache"          # always re-check for a new version
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response

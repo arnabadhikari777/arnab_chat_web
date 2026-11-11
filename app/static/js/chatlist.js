@@ -5,8 +5,8 @@
   if (!list) return;
   const empty = document.getElementById("chatlist-empty");
   const errorBox = document.getElementById("chatlist-error");
-  const active = Number(document.body.dataset.pollActive) || 2500;
-  const idle = Number(document.body.dataset.pollIdle) || 12000;
+  const fast = Math.max(Number(document.body.dataset.pollActive) || 2500, Number(document.body.dataset.pollList) || 5000);
+  const slow = Math.max(fast * 2, Number(document.body.dataset.pollIdle) || 12000);
   const COLORS = ["a", "b", "c", "d", "e"];
   let last = "";
 
@@ -74,12 +74,43 @@
     empty.classList.toggle("hidden", data.chats.length > 0);
   }
 
-  async function tick() {
-    await window.app.ready;
-    const res = await window.app.api("/api/chats");
-    errorBox.classList.toggle("hidden", res.ok);
-    if (res.ok) render(res.data);
-    setTimeout(tick, document.hidden ? idle : active);
+  /* One timer, one request at a time. Nothing is requested while the tab is hidden; when it is shown
+     again the list refreshes at once. When nothing changes for a while the interval grows. */
+  let timer = null, busy = false, failures = 0, unchanged = 0, ctl = null, gen = 0;
+  function schedule() {
+    clearTimeout(timer); timer = null;
+    if (document.hidden) return;
+    let ms = unchanged >= 6 ? slow : fast;
+    if (failures) ms = Math.min(60000, ms * Math.pow(2, failures));
+    timer = setTimeout(tick, ms);
   }
+  async function tick() {
+    clearTimeout(timer); timer = null;
+    if (busy || document.hidden) return;
+    busy = true;
+    const mine = ++gen;
+    ctl = new AbortController();
+    const signal = ctl.signal;
+    await window.app.ready;
+    const res = await window.app.api("/api/chats", { signal });
+    if (mine === gen) busy = false;
+    if (signal.aborted || mine !== gen) return;
+    if (res.status === 401) return;                   // signed out: stop for good
+    errorBox.classList.toggle("hidden", res.ok);
+    if (res.ok) {
+      failures = 0;
+      const before = last;
+      render(res.data);
+      unchanged = last === before ? unchanged + 1 : 0;
+      if (window.appBadge) { window.appBadge.set("messages", res.data.total_unread); window.appBadge.postpone(); }
+    } else failures = Math.min(failures + 1, 4);
+    schedule();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { clearTimeout(timer); timer = null; if (ctl) ctl.abort(); gen++; busy = false; }
+    else { unchanged = 0; tick(); }
+  });
+  window.addEventListener("online", () => { unchanged = 0; tick(); });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) { unchanged = 0; tick(); } });
   tick();
 })();

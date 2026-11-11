@@ -1,6 +1,7 @@
 from flask import abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user
 
+from ...extensions import limiter
 from ...middleware.guards import auth_required
 from ...services import message_request_service as requests_svc
 from ...services import people_service, report_service
@@ -44,6 +45,7 @@ def profile(username):
 
 @bp.post("/u/<username>/message")
 @auth_required
+@limiter.limit("60 per hour")
 def message(username):
     user = _other_or_404(username)
     try:
@@ -56,6 +58,7 @@ def message(username):
 
 @bp.post("/u/<username>/request")
 @auth_required
+@limiter.limit("30 per hour")
 def send_request(username):
     user = _other_or_404(username)
     try:
@@ -84,18 +87,21 @@ def _answer(request_id: int, action: str):
 
 @bp.post("/requests/<int:request_id>/accept")
 @auth_required
+@limiter.limit("60 per hour")
 def accept(request_id):
     return _answer(request_id, "accept")
 
 
 @bp.post("/requests/<int:request_id>/reject")
 @auth_required
+@limiter.limit("60 per hour")
 def reject(request_id):
     return _answer(request_id, "reject")
 
 
 @bp.route("/u/<username>/report", methods=["GET", "POST"])
 @auth_required
+@limiter.limit("10 per hour", methods=["POST"])
 def report(username):
     user = _other_or_404(username)
     if user.id == current_user.id:

@@ -9,6 +9,7 @@
   const API = "/api/conversations/" + convId;
   const POLL_ACTIVE = Number(document.body.dataset.pollActive) || 2500;
   const POLL_IDLE = Number(document.body.dataset.pollIdle) || 12000;
+  const POLL_MAX = Math.max(POLL_ACTIVE, Number(document.body.dataset.pollChatMax) || 5000);
   const LIMITS = {
     image: +root.dataset.maxImage, video: +root.dataset.maxVideo,
     document: Math.max(+root.dataset.maxDocument, +root.dataset.maxFile), voice: +root.dataset.maxVoiceBytes,
@@ -19,7 +20,8 @@
 
   const scroller = $("chat-scroll"), list = $("chat-messages"), input = $("msg-input");
   const state = { msgs: new Map(), els: new Map(), lastId: 0, firstId: 0, serverTime: "", hasMore: false,
-                  peer: null, stopped: false, typingAt: 0, typingTimer: null };
+                  peer: null, stopped: false, typingAt: 0, typingTimer: null, typingOn: false,
+                  loaded: false, retryOnShow: false };
 
   /* ---------------------------------------------------------------- tiny DOM helpers */
   const el = (tag, cls, text) => {
@@ -208,9 +210,9 @@
 
   /* ---------------------------------------------------------------- delivered / seen */
   async function acknowledge(incoming) {
+    if (visibleNow()) { markSeen(); return; }       // "seen" already means "delivered": one request, not two
     const unsent = incoming.filter((m) => !m.mine && !m.deleted && m.status === "sent").map((m) => m.id);
     if (unsent.length) await api(API + "/delivered", { method: "POST", json: { ids: unsent } });
-    markSeen();
   }
   let seenBusy = false;
   async function markSeen() {
@@ -228,12 +230,21 @@
   async function loadFirst() {
     await window.app.ready;
     const res = await api(API + "/messages");
-    if (!res.ok) { $("chat-offline").classList.remove("hidden"); return setTimeout(loadFirst, POLL_IDLE); }
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 401) { state.stopped = true; return; }
+      $("chat-offline").classList.remove("hidden");
+      // retry later; while the tab is hidden just remember to retry when it is shown again
+      setTimeout(() => { if (document.hidden) state.retryOnShow = true; else loadFirst(); }, POLL_IDLE);
+      return;
+    }
+    $("chat-offline").classList.add("hidden");
     state.serverTime = res.data.server_time; state.hasMore = res.data.has_more;
     res.data.messages.forEach((m) => put(m));
     separators(); toBottom(); showPeer(res.data.peer);
     $("load-older").classList.toggle("hidden", !state.hasMore);
+    state.loaded = true;
     acknowledge(res.data.messages);
+    activity();
     schedule();
   }
 
@@ -248,31 +259,77 @@
     scroller.scrollTop += scroller.scrollHeight - before;   // keep the view where it was
   }
 
-  async function pollOnce() {
+  /* One poll loop for this page: one timer, one request at a time, nothing while the tab is hidden.
+     Fast (POLL_ACTIVE) while something is going on, slower (up to POLL_MAX) when the chat is quiet, and
+     back to fast the moment a message, typing or a tap happens. */
+  let timer = null, inFlight = false, ctl = null, failures = 0, lastActivity = Date.now(), gen = 0;
+  function activity() { lastActivity = Date.now(); }
+  function interval() {
+    const quiet = Date.now() - lastActivity;
+    let ms = quiet < 30000 ? POLL_ACTIVE : quiet < 120000 ? Math.round((POLL_ACTIVE + POLL_MAX) / 2) : POLL_MAX;
+    if (failures) ms = Math.min(30000, ms * Math.pow(2, failures));      // network trouble: back off
+    return ms;
+  }
+
+  async function pollOnce() {          // returns true when the server has more waiting right away
+    ctl = new AbortController();
+    const mine = ctl;
     const url = API + "/poll?after=" + state.lastId + "&since=" + encodeURIComponent(state.serverTime);
-    const res = await api(url);
-    if (res.status === 404 || res.status === 401) { state.stopped = true; return; }
+    const res = await api(url, { signal: mine.signal });
+    if (mine.signal.aborted) return false;            // the tab was hidden meanwhile; the answer is dropped
+    if (res.status === 404 || res.status === 401) { state.stopped = true; return false; }
     $("chat-offline").classList.toggle("hidden", res.ok);
-    if (!res.ok) return;
+    if (!res.ok) { failures = Math.min(failures + 1, 4); return false; }
+    failures = 0;
     const stick = nearBottom();
     state.serverTime = res.data.server_time;
     res.data.messages.forEach((m) => put(m));
     applyUpdates(res.data.updates);
     separators(); showPeer(res.data.peer);
+    if (res.data.messages.length || res.data.updates.length || res.data.peer.typing) activity();
     if (res.data.messages.length) {
       if (stick) toBottom();
       acknowledge(res.data.messages);
     } else markSeen();
+    return !!res.data.more;
   }
 
-  let timer = null;
-  function schedule() {
-    clearTimeout(timer);
-    if (state.stopped) return;
-    timer = setTimeout(async () => { await pollOnce(); schedule(); }, document.hidden ? POLL_IDLE : POLL_ACTIVE);
+  async function run() {
+    timer = null;
+    if (inFlight || state.stopped || document.hidden || !state.loaded) return;
+    inFlight = true;
+    const mine = ++gen;                               // a newer run (after hide/show) makes this one obsolete
+    try {
+      for (let i = 0; i < 10; i++) {                  // catch up in pages if a lot was missed
+        const more = await pollOnce();
+        if (!more || state.stopped || document.hidden || mine !== gen) break;
+      }
+    } finally { if (mine === gen) inFlight = false; }
+    if (mine === gen) schedule();
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { pollOnce(); schedule(); } });
-  window.addEventListener("focus", markSeen);
+  function schedule() {
+    clearTimeout(timer); timer = null;
+    if (state.stopped || document.hidden || !state.loaded) return;
+    timer = setTimeout(run, interval());
+  }
+  function syncNow() {                 // tab shown again / window focused / network back: catch up at once
+    if (state.retryOnShow) { state.retryOnShow = false; loadFirst(); return; }
+    if (inFlight || state.stopped || !state.loaded) return;
+    activity();
+    clearTimeout(timer); timer = null;
+    run();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearTimeout(timer); timer = null;
+      if (ctl) ctl.abort();
+      gen++; inFlight = false;
+      stopTyping(true);
+    } else syncNow();
+  });
+  window.addEventListener("focus", () => { markSeen(); syncNow(); });
+  window.addEventListener("online", syncNow);
+  window.addEventListener("pageshow", (e) => { if (e.persisted) syncNow(); });   // back/forward cache, phone unlocked
 
   /* ---------------------------------------------------------------- sending */
   function addPending(m) {
@@ -365,15 +422,23 @@
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 130) + "px";
   }
-  function typing(on) {
-    api(API + "/typing", { method: "POST", json: { typing: on } });
+  function sendTyping(on, keepalive) {
+    api(API + "/typing", { method: "POST", json: { typing: on }, keepalive: !!keepalive });
+  }
+  function stopTyping(keepalive) {      // only ever tells the server when it had been told "typing"
+    clearTimeout(state.typingTimer);
+    if (!state.typingOn) return;
+    state.typingOn = false; state.typingAt = 0;
+    sendTyping(false, keepalive);
   }
   input.addEventListener("input", () => {
     sync();
+    activity();
     const now = Date.now();
-    if (input.value.trim() && now - state.typingAt > 3000) { state.typingAt = now; typing(true); }
+    if (!input.value.trim()) { stopTyping(); return; }
+    if (!state.typingOn || now - state.typingAt > 3000) { state.typingAt = now; state.typingOn = true; sendTyping(true); }
     clearTimeout(state.typingTimer);
-    state.typingTimer = setTimeout(() => { state.typingAt = 0; typing(false); }, 4000);
+    state.typingTimer = setTimeout(() => stopTyping(), 4000);
   });
   /* Computer: Enter sends, Shift+Enter makes a new line. Phone/tablet (touch): Enter stays a new line,
      the send button is used. Ctrl/Cmd+Enter always sends. */
@@ -397,8 +462,9 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = ""; sync();
-    clearTimeout(state.typingTimer); state.typingAt = 0; typing(false);
+    stopTyping();
     sendText(text);
+    activity();
     input.focus();
   });
 
@@ -503,7 +569,7 @@
     voiceReset();
     sendFile(file, { voice: true, duration: seconds, name: file.name });
   });
-  window.addEventListener("pagehide", () => vr.rec && vr.rec.cancel());   // never leave the mic on
+  window.addEventListener("pagehide", () => { stopTyping(true); if (vr.rec) vr.rec.cancel(); });   // never leave the mic on
 
   /* ---------------------------------------------------------------- delete & lightbox */
   function options(u) {

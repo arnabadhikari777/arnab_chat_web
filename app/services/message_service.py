@@ -14,7 +14,7 @@ from ..utils.time import utcnow
 from . import cloudinary_service, notification_service
 from .errors import ServiceError, UploadError
 from .presence_service import iso
-from .upload_validator import kind_for_extension, validate_upload
+from .upload_validator import kind_for_extension, split_filename, validate_upload
 
 _UUID_RE = re.compile(r"^[A-Za-z0-9\-]{8,36}$")
 _ORDER = {"sent": 0, "delivered": 1, "seen": 2}   # a status only ever moves forward
@@ -108,11 +108,7 @@ def send_media(user: User, conv: Conversation, client_uuid: str, file, voice: bo
     if (old := _existing(user.id, client_uuid)):
         return old, False
 
-    from pathlib import Path
-    from werkzeug.utils import secure_filename
-
-    name = secure_filename(getattr(file, "filename", "") or "")
-    ext = Path(name).suffix.lower().lstrip(".")
+    _, ext = split_filename(getattr(file, "filename", "") or "")
     kind = kind_for_extension(ext, "voice" if voice else None)
     if kind is None:
         raise UploadError("upload.bad_type")
@@ -130,7 +126,7 @@ def send_media(user: User, conv: Conversation, client_uuid: str, file, voice: bo
                   client_uuid=client_uuid)
     msg.attachments.append(MessageAttachment(
         public_id=asset["public_id"], url=asset["url"], resource_type=asset["resource_type"],
-        mime_type=getattr(file, "mimetype", None), original_name=upload.filename,
+        mime_type=upload.mime, original_name=upload.filename,
         size_bytes=upload.size, duration_seconds=dur,
     ))
     db.session.add(msg)
@@ -180,22 +176,28 @@ def poll(user: User, conv: Conversation, after_id: int, since: datetime | None):
 
 # ------------------------------------------------------------------ status
 def mark_delivered(user: User, conv: Conversation, ids=None) -> int:
+    if ids is not None and not ids:
+        return 0
     q = Message.query.filter(
         Message.conversation_id == conv.id, Message.sender_id != user.id, Message.status == "sent"
     )
     if ids is not None:
         q = q.filter(Message.id.in_(ids))
     n = q.update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
-    db.session.commit()
+    if n:
+        db.session.commit()
     return n
 
 
 def mark_all_delivered(user: User) -> int:
     """The recipient's app is open and asked for its chats, so waiting messages arrived."""
-    n = Message.query.filter(
+    waiting = Message.query.filter(
         Message.conversation_id.in_(_my_conversation_ids(user.id)),
         Message.sender_id != user.id, Message.status == "sent",
-    ).update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
+    )
+    if waiting.first() is None:        # the common case: a cheap read, no write, no commit
+        return 0
+    n = waiting.update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
     db.session.commit()
     return n
 
@@ -211,8 +213,9 @@ def mark_seen(user: User, conv: Conversation, upto_id: int | None = None) -> int
     n = q.update({"status": "seen", "seen_at": now,
                   "delivered_at": func.coalesce(Message.delivered_at, now)},
                  synchronize_session=False)
-    notification_service.clear_message_notice(user.id, conv.id)
-    db.session.commit()
+    cleared = notification_service.clear_message_notice(user.id, conv.id)
+    if n or cleared:                        # nothing new to acknowledge = nothing to write
+        db.session.commit()
     return n
 
 
@@ -264,17 +267,28 @@ def chat_list(user: User, limit: int = 100) -> list[dict]:
     convs = (Conversation.query.filter(or_(Conversation.user_low_id == user.id,
                                            Conversation.user_high_id == user.id))
              .order_by(Conversation.last_message_at.desc(), Conversation.id.desc()).limit(limit).all())
+    if not convs:
+        return []
+    conv_ids = [c.id for c in convs]
     others = {u.id: u for u in User.query.filter(
-        User.id.in_([c.other_user_id(user.id) for c in convs] or [0])).all()}
+        User.id.in_([c.other_user_id(user.id) for c in convs])).all()}
+    # Two grouped queries for ALL conversations (instead of two queries for each one).
+    newest = (db.session.query(func.max(Message.id))
+              .filter(Message.conversation_id.in_(conv_ids), Message.id.not_in(_hidden_for(user.id)))
+              .group_by(Message.conversation_id))
+    last_by_conv = {m.conversation_id: m for m in Message.query.filter(Message.id.in_(newest)).all()}
+    unread_by_conv = dict(
+        db.session.query(Message.conversation_id, func.count(Message.id))
+        .filter(Message.conversation_id.in_(conv_ids), _unread_filter(user.id))
+        .group_by(Message.conversation_id).all())
     items = []
     for conv in convs:
         other = others.get(conv.other_user_id(user.id))
         if other is None or other.status != "active":
             continue
-        last = _visible(user.id, conv.id).order_by(Message.id.desc()).first()
-        unread = Message.query.filter(Message.conversation_id == conv.id, _unread_filter(user.id)).count()
         items.append({
-            "id": conv.id, "unread": unread, "last": _preview(last, user.id),
+            "id": conv.id, "unread": unread_by_conv.get(conv.id, 0),
+            "last": _preview(last_by_conv.get(conv.id), user.id),
             "user": {"name": other.full_name, "username": other.username,
                      "avatar": other.avatar_url, "online": is_online(other), "seed": other.id % 5},
         })

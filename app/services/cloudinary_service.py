@@ -70,13 +70,82 @@ def _proxies() -> dict | None:
     return {"http": forced, "https": forced} if forced else None
 
 
-def _post(resource_type: str, action: str, params: dict, files: dict | None = None) -> dict:
+class _MultipartStream:
+    """Builds the multipart upload body on the fly, 64 KB at a time.
+
+    `requests` would otherwise call file.read() (a full copy of a 25 MB video) and then build a second
+    full copy for the body. This reads from the already-spooled upload file in small pieces, so the memory
+    used stays small however big the file is. The exact length is known up front (no chunked encoding).
+    """
+
+    CHUNK = 64 * 1024
+
+    def __init__(self, fields: dict, file_field: str, filename: str, stream, size: int):
+        import uuid
+
+        self.boundary = uuid.uuid4().hex
+        self.content_type = f"multipart/form-data; boundary={self.boundary}"
+        head = "".join(
+            f'--{self.boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'
+            for k, v in fields.items()
+        )
+        safe_name = filename.replace('"', "").replace("\r", "").replace("\n", "")
+        head += (f'--{self.boundary}\r\nContent-Disposition: form-data; name="{file_field}"; '
+                 f'filename="{safe_name}"\r\nContent-Type: application/octet-stream\r\n\r\n')
+        self._head = head.encode("utf-8")
+        self._tail = f"\r\n--{self.boundary}--\r\n".encode("utf-8")
+        self._stream = stream
+        self._size = size
+        self._reset()
+
+    def _reset(self):
+        self._stream.seek(0)
+        self._state = 0           # 0 = head, 1 = file, 2 = tail, 3 = done
+        self._left = self._size
+
+    def __len__(self):
+        return len(self._head) + self._size + len(self._tail)
+
+    def __iter__(self):
+        self._reset()
+        while True:
+            chunk = self.read(self.CHUNK)
+            if not chunk:
+                return
+            yield chunk
+
+    def read(self, size: int = -1) -> bytes:
+        size = self.CHUNK if size is None or size < 0 else size
+        if self._state == 0:
+            self._state = 1
+            return self._head
+        if self._state == 1:
+            data = self._stream.read(min(size, self._left)) if self._left > 0 else b""
+            self._left -= len(data)
+            if not data or self._left <= 0:
+                self._state = 2
+            return data or self.read(size)
+        if self._state == 2:
+            self._state = 3
+            return self._tail
+        return b""
+
+
+def _post(resource_type: str, action: str, params: dict, files: dict | None = None,
+          stream_file: tuple | None = None) -> dict:
+    """stream_file = (filename, stream, size) is sent without loading it into memory."""
     cloud, key, secret = _creds()
     params = {k: _str(v) for k, v in params.items() if v is not None}
     params["timestamp"] = str(int(time.time()))
     payload = dict(params, api_key=key, signature=_sign(params, secret))
-    resp = requests.post(f"{_API_BASE}/{cloud}/{resource_type}/{action}", data=payload, files=files,
-                         timeout=_TIMEOUT, proxies=_proxies())
+    url = f"{_API_BASE}/{cloud}/{resource_type}/{action}"
+    if stream_file is not None:
+        filename, stream, size = stream_file
+        body = _MultipartStream(payload, "file", filename, stream, size)
+        resp = requests.post(url, data=body, headers={"Content-Type": body.content_type},
+                             timeout=_TIMEOUT, proxies=_proxies())
+    else:
+        resp = requests.post(url, data=payload, files=files, timeout=_TIMEOUT, proxies=_proxies())
     try:
         body = resp.json()
     except ValueError:
@@ -101,7 +170,10 @@ def _api_upload(stream, **options) -> dict:
     if transformation:
         params["transformation"] = _transformation_string(transformation)
     filename = options.pop("filename", None) or getattr(stream, "filename", None) or "upload"
-    return _post(resource_type, "upload", params, files={"file": (filename, stream.read())})
+    stream.seek(0, 2)
+    size = stream.tell()
+    stream.seek(0)
+    return _post(resource_type, "upload", params, stream_file=(filename, stream, size))
 
 
 def _api_destroy(public_id: str, **options) -> dict:

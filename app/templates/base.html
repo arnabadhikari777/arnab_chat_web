@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
 </head>
-<body{% if current_user.is_authenticated %} data-auth="1" data-poll-active="{{ config.POLL_INTERVAL_ACTIVE_MS }}" data-poll-idle="{{ config.POLL_INTERVAL_IDLE_MS }}"{% endif %}>
+<body{% if current_user.is_authenticated %} data-auth="1" data-poll-active="{{ config.POLL_INTERVAL_ACTIVE_MS }}" data-poll-idle="{{ config.POLL_INTERVAL_IDLE_MS }}" data-poll-chat-max="{{ config.POLL_INTERVAL_CHAT_MAX_MS }}" data-poll-list="{{ config.POLL_INTERVAL_LIST_MS }}"{% endif %}>
   {% include "partials/icons.html" %}
   <div class="app">
     {% block app %}{% endblock %}
@@ -29,12 +29,5 @@
   <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
   {% if current_user.is_authenticated %}<script src="{{ url_for('static', filename='js/badge.js') }}" defer></script>{% endif %}
   {% block scripts %}{% endblock %}
-  <script>
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", function () {
-        navigator.serviceWorker.register("{{ url_for('static', filename='js/sw.js') }}").catch(function () {});
-      });
-    }
-  </script>
 </body>
 </html>

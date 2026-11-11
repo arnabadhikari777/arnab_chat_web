@@ -21,6 +21,7 @@ class OtpVerification(db.Model):
         db.CheckConstraint(
             "purpose in ('register','reset_password','change_password')", name="ck_otp_purpose"
         ),
+        db.Index("ix_otp_email_purpose_id", "email", "purpose", "id"),
     )
 
 

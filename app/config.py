@@ -60,7 +60,7 @@ class Config:
     PERMANENT_SESSION_LIFETIME = env_int("SESSION_LIFETIME_DAYS", 14) * 24 * 3600
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-    SESSION_COOKIE_SECURE = APP_ENV == "production"
+    SESSION_COOKIE_SECURE = env_bool("SESSION_COOKIE_SECURE", APP_ENV == "production")
     REMEMBER_COOKIE_HTTPONLY = True
     REMEMBER_COOKIE_SECURE = APP_ENV == "production"
     WTF_CSRF_TIME_LIMIT = None  # token lives as long as the session
@@ -74,6 +74,13 @@ class Config:
     MAIL_USERNAME = env_str("MAIL_USERNAME")
     MAIL_PASSWORD = env_str("MAIL_PASSWORD")
     MAIL_FROM_NAME = env_str("MAIL_FROM_NAME", APP_NAME)
+    # smtp (default) | sendgrid | mailgun | brevo | resend. The last four use HTTPS, which is the
+    # only kind of outgoing connection PythonAnywhere Free reliably allows (see docs/DEPLOY_PYTHONANYWHERE.md).
+    MAIL_PROVIDER = env_str("MAIL_PROVIDER", "smtp").lower()
+    MAIL_API_KEY = env_str("MAIL_API_KEY")
+    MAIL_API_DOMAIN = env_str("MAIL_API_DOMAIN")          # Mailgun sending domain only
+    MAIL_FROM_ADDRESS = env_str("MAIL_FROM_ADDRESS")      # defaults to MAIL_USERNAME
+    MAIL_TIMEOUT_SECONDS = env_int("MAIL_TIMEOUT_SECONDS", 15)
     OTP_LENGTH = env_int("OTP_LENGTH", 6)
     OTP_EXPIRY_MINUTES = env_int("OTP_EXPIRY_MINUTES", 10)
     OTP_RESEND_COOLDOWN_SECONDS = env_int("OTP_RESEND_COOLDOWN_SECONDS", 60)
@@ -127,10 +134,21 @@ class Config:
     REALTIME_MODE = env_str("REALTIME_MODE", "polling")
     POLL_INTERVAL_ACTIVE_MS = env_int("POLL_INTERVAL_ACTIVE_MS", 2500)
     POLL_INTERVAL_IDLE_MS = env_int("POLL_INTERVAL_IDLE_MS", 12000)
-    PRESENCE_TIMEOUT_SECONDS = env_int("PRESENCE_TIMEOUT_SECONDS", 30)
+    # A person counts as online if seen within PRESENCE_TIMEOUT_SECONDS. The database is written at most
+    # once per PRESENCE_WRITE_INTERVAL_SECONDS, and the timeout is never allowed to be shorter than that.
+    PRESENCE_TIMEOUT_SECONDS = env_int("PRESENCE_TIMEOUT_SECONDS", 75)
+    PRESENCE_WRITE_INTERVAL_SECONDS = env_int("PRESENCE_WRITE_INTERVAL_SECONDS", 30)
+    # Slowest the open chat / chat list polls when nothing is happening (the fast rate comes back
+    # the moment anything changes).
+    POLL_INTERVAL_CHAT_MAX_MS = env_int("POLL_INTERVAL_CHAT_MAX_MS", 5000)
+    POLL_INTERVAL_LIST_MS = env_int("POLL_INTERVAL_LIST_MS", 5000)
 
     # ---- rate limiting ----
     RATELIMIT_STORAGE_URI = env_str("RATELIMIT_STORAGE_URI", "memory://")
+    # Number of reverse proxies in front of the app (PythonAnywhere = 1). Makes the client IP real,
+    # so one person's limit is not shared by everybody. Use 0 for local development.
+    TRUSTED_PROXY_COUNT = env_int("TRUSTED_PROXY_COUNT", 1 if APP_ENV == "production" else 0)
+    LOGIN_ACCOUNT_LIMIT = env_str("LOGIN_ACCOUNT_LIMIT", "8 per 15 minutes")
 
     # ---- Math Class SSO ----
     SSO_SHARED_SECRET = env_str("SSO_SHARED_SECRET")

@@ -1,4 +1,5 @@
 from flask import current_app, flash, redirect, render_template, request, session, url_for
+from flask_login import login_user
 from flask_login import current_user
 
 from ...extensions import db, limiter
@@ -32,6 +33,7 @@ def privacy():
 
 @bp.route("/profile", methods=["GET", "POST"])
 @auth_required
+@limiter.limit("30 per hour", methods=["POST"])
 def edit_profile():
     errors = {}
     if request.method == "POST":
@@ -110,6 +112,13 @@ def password_confirm():
             error = (exc.key, exc.values)
         else:
             _clear_pending()
+            # Every other signed-in browser/phone is now signed out (the session id contains a password
+            # fingerprint). This one stays signed in with a fresh session.
+            keep = {k: session[k] for k in ("lang",) if k in session}
+            session.clear()
+            session.update(keep)
+            session.permanent = True
+            login_user(current_user._get_current_object())
             flash("flash.password_updated", "success")
             return redirect(url_for("settings.index"))
     return render_template(

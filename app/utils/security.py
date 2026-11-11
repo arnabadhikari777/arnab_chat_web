@@ -1,4 +1,6 @@
 def register_security_headers(app) -> None:
+    from flask import request
+
     csp = "; ".join(
         [
             "default-src 'self'",
@@ -23,6 +25,10 @@ def register_security_headers(app) -> None:
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), geolocation=(), microphone=(self)"
         )
+        # Pages and API answers can hold private data: browsers and the service worker must not keep them.
+        if request.endpoint != "static" and "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "no-store"
+            response.headers.add("Vary", "Cookie")
         if app.config.get("APP_ENV") == "production":
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return response

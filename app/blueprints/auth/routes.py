@@ -25,9 +25,22 @@ def _max_photo_mb() -> int:
     return max(1, current_app.config["UPLOAD_MAX_BYTES"]["image"] // (1024 * 1024))
 
 
+def _rotate_session() -> None:
+    """Start from a clean session at every login (blocks session fixation). Only the language choice and
+    messages waiting to be shown are carried over; the CSRF token is created again."""
+    keep = {k: session[k] for k in ("lang", "_flashes") if k in session}
+    session.clear()
+    session.update(keep)
+
+
+def _login_account_key() -> str:
+    """Rate-limit key per account name, so one account cannot be hammered from many IP addresses."""
+    ident = (request.form.get("identifier") or "").strip().lower()
+    return "login:" + hashlib.sha256(ident.encode()).hexdigest()[:24]
+
+
 def _start_session(user, next_url: str | None = None):
-    session.pop("pending_email", None)
-    session.pop("pending_purpose", None)
+    _rotate_session()
     session.permanent = True
     login_user(user)
     return redirect(safe_next(next_url, url_for("main.home")))
@@ -135,6 +148,7 @@ def resend_verification():
 # ---------------------------------------------------------------- login / logout
 @bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute;60 per hour", methods=["POST"])
+@limiter.limit(lambda: current_app.config["LOGIN_ACCOUNT_LIMIT"], key_func=_login_account_key, methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("main.home"))
@@ -162,7 +176,9 @@ def login():
 @bp.post("/logout")
 def logout():
     logout_user()
-    _clear_pending()
+    keep = {k: session[k] for k in ("lang",) if k in session}
+    session.clear()                      # nothing of the old session survives a logout
+    session.update(keep)
     flash("flash.logged_out", "success")
     return redirect(url_for("auth.login"))
 
@@ -272,6 +288,7 @@ def sso_login():
         flash("flash.login_required", "error")
         return redirect(url_for("auth.login"))
 
+    _rotate_session()
     session.permanent = True
     login_user(user)
     return redirect(url_for("main.home"))

@@ -8,6 +8,9 @@ from .utils.logging_setup import configure_logging
 from .utils.security import register_security_headers
 
 
+_NO_PRESENCE = {"static", "main.health", "main.i18n_bundle", "main.service_worker"}
+
+
 def create_app(config_name: str | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(get_config(config_name))
@@ -16,6 +19,12 @@ def create_app(config_name: str | None = None) -> Flask:
         raise RuntimeError(
             "SECRET_KEY is missing. Copy .env.example to .env and set SECRET_KEY."
         )
+
+    proxies = int(app.config.get("TRUSTED_PROXY_COUNT") or 0)
+    if proxies:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies, x_host=proxies)
 
     (BASE_DIR / "instance").mkdir(exist_ok=True)
     configure_logging(app)
@@ -31,8 +40,15 @@ def create_app(config_name: str | None = None) -> Flask:
     @login_manager.user_loader
     def _load_user(user_id: str):
         # A suspended/banned or unverified account is signed out on its next request.
-        user = db.session.get(models.User, int(user_id))
-        if user and user.is_active and user.is_email_verified:
+        # The id looks like "12.<fingerprint>": a password change invalidates older sessions.
+        import hmac
+
+        raw_id, _, fingerprint = str(user_id).partition(".")
+        if not raw_id.isdigit() or not fingerprint:
+            return None
+        user = db.session.get(models.User, int(raw_id))
+        if (user and user.is_active and user.is_email_verified
+                and hmac.compare_digest(user.session_fingerprint(), fingerprint)):
             return user
         return None
 
@@ -73,8 +89,9 @@ def create_app(config_name: str | None = None) -> Flask:
 
     @app.before_request
     def _presence_heartbeat():
-        """Every page and poll shows the person as online (throttled to one write / 10 s)."""
-        if request.endpoint and request.endpoint != "static" and current_user.is_authenticated:
+        """Pages and polls show the person as online (the database is written at most every 30 s)."""
+        if (request.endpoint and request.endpoint not in _NO_PRESENCE
+                and current_user.is_authenticated):
             presence_service.touch(current_user)
 
     return app

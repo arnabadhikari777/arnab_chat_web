@@ -108,5 +108,23 @@
   }
   ready.then(() => document.querySelectorAll("time[data-ts]").forEach((el) => { el.textContent = fmtStamp(el.dataset.ts); }));
 
+  /* ---- service worker: public static files only (see sw.js). Served from "/" so it covers every page. ---- */
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.getRegistrations()          // remove the old worker that lived under /static/js/
+        .then((regs) => regs.forEach((r) => { if (r.scope.indexOf("/static/") !== -1) r.unregister(); }))
+        .catch(() => {});
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    });
+    // On logout wipe everything the worker kept, so nothing from this account stays on the device.
+    document.addEventListener("submit", (e) => {
+      const form = e.target;
+      if (form && form.action && /\/logout\/?$/.test(new URL(form.action, location.href).pathname)) {
+        if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage("clear-caches");
+        if (window.caches) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+      }
+    });
+  }
+
   window.app = { fmtTime, fmtDay, fmtStamp, lastSeen, sameDay, api, toast, confirmDialog, t, ready };
 })();

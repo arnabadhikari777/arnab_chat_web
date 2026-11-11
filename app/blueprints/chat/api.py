@@ -1,7 +1,7 @@
 """JSON endpoints used by the chat pages. Every one checks the person is in the conversation."""
 from datetime import datetime
 
-from flask import abort, jsonify, request
+from flask import abort, g, jsonify, request
 from flask_login import current_user
 
 from ...extensions import db, limiter
@@ -20,14 +20,20 @@ def _error(exc: ServiceError, status: int = 400):
 
 
 def _conv(conversation_id: int):
+    """The conversation, only for its two members, and only while the other person's account is active.
+    The other person is loaded once here and reused for the presence info (one query less per poll)."""
     conv = conversation_service.get_for_member(current_user.id, conversation_id)
     if conv is None:
         abort(404)
+    other = db.session.get(User, conv.other_user_id(current_user.id))
+    if other is None or other.status != "active":
+        abort(404)
+    g.chat_peer = other
     return conv
 
 
 def _peer(conv):
-    other = db.session.get(User, conv.other_user_id(current_user.id))
+    other = getattr(g, "chat_peer", None) or db.session.get(User, conv.other_user_id(current_user.id))
     info = presence_service.peer_info(other)
     info["typing"] = get_backend().is_typing(conv.id, other.id)
     return info
@@ -81,6 +87,7 @@ def messages(conversation_id):
 @bp.post("/api/conversations/<int:conversation_id>/messages")
 @auth_required
 @limiter.limit("90 per minute")
+@limiter.limit("20 per minute", exempt_when=lambda: request.mimetype != "multipart/form-data")  # file uploads
 def send(conversation_id):
     conv = _conv(conversation_id)
     try:
@@ -105,25 +112,30 @@ def send(conversation_id):
 
 @bp.get("/api/conversations/<int:conversation_id>/poll")
 @auth_required
+@limiter.limit("120 per minute")
 def poll(conversation_id):
     conv = _conv(conversation_id)
     server_time = _server_time()
     new, updates = message_service.poll(
         current_user, conv, _int(request.args.get("after")), _since(request.args.get("since")))
     return jsonify({"messages": [message_service.serialize(m, current_user.id) for m in new],
-                    "updates": updates, "server_time": server_time, "peer": _peer(conv)})
+                    "updates": updates, "server_time": server_time, "peer": _peer(conv),
+                    "more": len(new) >= 100})     # a full page came back: ask again straight away
 
 
 @bp.post("/api/conversations/<int:conversation_id>/delivered")
 @auth_required
+@limiter.limit("120 per minute")
 def delivered(conversation_id):
     conv = _conv(conversation_id)
-    ids = [i for i in ((request.get_json(silent=True) or {}).get("ids") or []) if isinstance(i, int)][:200]
+    raw = (request.get_json(silent=True) or {}).get("ids")
+    ids = [i for i in (raw if isinstance(raw, list) else []) if isinstance(i, int) and not isinstance(i, bool)][:200]
     return jsonify({"ok": True, "updated": message_service.mark_delivered(current_user, conv, ids)})
 
 
 @bp.post("/api/conversations/<int:conversation_id>/seen")
 @auth_required
+@limiter.limit("120 per minute")
 def seen(conversation_id):
     conv = _conv(conversation_id)
     upto = _int((request.get_json(silent=True) or {}).get("upto")) or None
@@ -132,6 +144,7 @@ def seen(conversation_id):
 
 @bp.post("/api/conversations/<int:conversation_id>/typing")
 @auth_required
+@limiter.limit("120 per minute")
 def typing(conversation_id):
     conv = _conv(conversation_id)
     is_typing = bool((request.get_json(silent=True) or {}).get("typing"))
@@ -142,6 +155,7 @@ def typing(conversation_id):
 # ------------------------------------------------------------------ one message
 @bp.post("/api/messages/<int:message_id>/delete")
 @auth_required
+@limiter.limit("60 per minute")
 def delete(message_id):
     msg = message_service.get_message_for_member(current_user, message_id)
     if msg is None:

@@ -3,8 +3,9 @@
 We check the extension (from .env), the size (from .env) and the first bytes of the file
 (so a renamed .exe or a text file called .png is rejected).
 """
+import mimetypes
+import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from flask import current_app
 from werkzeug.utils import secure_filename
@@ -46,6 +47,21 @@ _SNIFF = {
 _STRICT = {"image", "video", "voice"}
 
 
+# Files that have no signature of their own (.txt, .csv) must at least look like plain text.
+_TEXT_ONLY_EXT = {"txt", "csv"}
+_DANGEROUS_START = (b"MZ", b"\x7fELF", b"#!", b"<?php", b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe",
+                    b"<!doctype html", b"<html", b"<script", b"<svg", b"<?xml", b"<iframe")
+# Content-Types the browser may claim that we never accept, whatever the file is called.
+_BAD_MIME = {
+    "text/html", "application/xhtml+xml", "image/svg+xml", "text/javascript", "application/javascript",
+    "application/x-javascript", "application/x-msdownload", "application/x-dosexec", "application/x-sh",
+    "application/x-httpd-php", "application/x-executable", "application/java-archive",
+    "application/x-msdos-program", "application/vnd.microsoft.portable-executable",
+}
+_MIME_FAMILY = {"image": ("image/",), "video": ("video/",), "voice": ("audio/", "video/")}
+_EXT_RE = re.compile(r"^[a-z0-9]{1,8}$")
+
+
 @dataclass
 class ValidatedUpload:
     stream: object
@@ -53,6 +69,31 @@ class ValidatedUpload:
     extension: str
     size: int
     kind: str
+    mime: str = "application/octet-stream"
+
+
+def split_filename(raw: str | None) -> tuple[str, str]:
+    """Return (safe_name, extension). The extension is read from the original name, so a file called
+    "ছবি.png" keeps its ".png" (werkzeug's secure_filename would throw the Bengali part AND the dot away)."""
+    raw = (raw or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    stem, dot, ext = raw.rpartition(".")
+    if not dot:
+        stem, ext = raw, ""
+    ext = ext.lower()
+    if not _EXT_RE.match(ext):
+        ext = ""
+    safe_stem = secure_filename(stem)[:80] or "file"
+    return (safe_stem + ("." + ext if ext else "")), ext
+
+
+def _mime_allowed(kind: str, declared: str | None) -> bool:
+    value = (declared or "").split(";")[0].strip().lower()
+    if not value or value == "application/octet-stream":
+        return True                       # browsers often send nothing useful; the signature check decides
+    if value in _BAD_MIME:
+        return False
+    family = _MIME_FAMILY.get(kind)
+    return value.startswith(family) if family else True
 
 
 def kind_for_extension(ext: str, hint: str | None = None) -> str | None:
@@ -73,8 +114,7 @@ def validate_upload(file_storage, kind: str) -> ValidatedUpload:
     if file_storage is None or not file_storage.filename:
         raise UploadError("upload.required")
 
-    filename = secure_filename(file_storage.filename) or "file"
-    ext = Path(filename).suffix.lower().lstrip(".")
+    filename, ext = split_filename(file_storage.filename)
     if ext not in cfg["UPLOAD_ALLOWED_EXTENSIONS"].get(kind, []):
         raise UploadError("upload.bad_type")
 
@@ -88,6 +128,9 @@ def validate_upload(file_storage, kind: str) -> ValidatedUpload:
     if size > limit:
         raise UploadError("upload.too_large", size=max(1, limit // (1024 * 1024)))
 
+    if not _mime_allowed(kind, getattr(file_storage, "mimetype", None)):
+        raise UploadError("upload.bad_type")
+
     check = _SNIFF.get(kind, {}).get(ext)
     if check is None and kind in _STRICT:
         raise UploadError("upload.corrupt")        # we cannot prove it is real
@@ -97,4 +140,11 @@ def validate_upload(file_storage, kind: str) -> ValidatedUpload:
         if not check(head):
             raise UploadError("upload.corrupt")
 
-    return ValidatedUpload(stream=stream, filename=filename, extension=ext, size=size, kind=kind)
+    if check is None and ext in _TEXT_ONLY_EXT:
+        head = stream.read(8192)
+        stream.seek(0)
+        if b"\x00" in head or head.lstrip()[:16].lower().startswith(_DANGEROUS_START):
+            raise UploadError("upload.corrupt")
+
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"   # never the client's claim
+    return ValidatedUpload(stream=stream, filename=filename, extension=ext, size=size, kind=kind, mime=mime)

@@ -1,3 +1,6 @@
+import hmac
+from hashlib import sha256
+
 from flask import current_app
 from flask_login import UserMixin
 from sqlalchemy.orm import validates
@@ -63,6 +66,14 @@ class User(UserMixin, db.Model):
 
     def check_password(self, raw_password: str) -> bool:
         return check_password_hash(self.password_hash, raw_password)
+
+    def session_fingerprint(self) -> str:
+        """Changes whenever the password changes, which signs out every older session."""
+        key = (current_app.config.get("SECRET_KEY") or "").encode()
+        return hmac.new(key, (self.password_hash or "").encode(), sha256).hexdigest()[:16]
+
+    def get_id(self) -> str:  # Flask-Login stores this in the session cookie
+        return f"{self.id}.{self.session_fingerprint()}"
 
     @property
     def is_active(self) -> bool:  # Flask-Login: inactive users cannot log in

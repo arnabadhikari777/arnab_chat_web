@@ -41,10 +41,11 @@ def upsert_message_notice(recipient, sender, conversation) -> None:
     note.created_at = utcnow()
 
 
-def clear_message_notice(user_id: int, conversation_id: int) -> None:
-    Notification.query.filter_by(user_id=user_id, dedupe_key=f"msg:{conversation_id}").update(
-        {"is_read": True}
-    )
+def clear_message_notice(user_id: int, conversation_id: int) -> int:
+    """Mark this chat's notice read. Returns how many rows changed (0 = nothing was written)."""
+    return Notification.query.filter_by(
+        user_id=user_id, dedupe_key=f"msg:{conversation_id}", is_read=False
+    ).update({"is_read": True})
 
 
 def unread_count(user_id: int) -> int:

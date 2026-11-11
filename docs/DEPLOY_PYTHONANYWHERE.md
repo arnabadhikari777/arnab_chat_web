@@ -92,3 +92,29 @@ then press **Reload** on the Web tab.
 - **Real-time:** only `app/realtime/` talks to the transport. Add a Socket.IO backend implementing `RealtimeBackend` (see `docs/ARCHITECTURE.md`) on a host with WebSockets (a VPS, Render, Fly.io, Railway ...).
 - **Database:** set `DATABASE_URL` (e.g. PostgreSQL) and run `flask db upgrade`.
 - **Rate limit / typing state:** they are in memory (one worker). With several workers use Redis: set `RATELIMIT_STORAGE_URI=redis://...` and move typing state into Redis.
+
+
+## Email on the Free plan (checked November 2026)
+
+PythonAnywhere Free reaches the internet only through an allow-list proxy, and only over HTTP/HTTPS.
+Plain SMTP is refused for every server except Gmail's; recent forum reports show even Gmail can be refused
+(`Connection refused`, errno 111). So Gmail SMTP is **not guaranteed**. Test it on your account:
+
+    python -m flask --app run.py check-services
+
+If it says FAILED, switch to an HTTPS email API in `.env` (no code change):
+
+| MAIL_PROVIDER | needs | notes |
+|---|---|---|
+| `sendgrid` | `MAIL_API_KEY`, `MAIL_FROM_ADDRESS` (verified sender) | `api.sendgrid.com` is on the PythonAnywhere allow-list; the free plan is a 60-day trial |
+| `mailgun` | `MAIL_API_KEY`, `MAIL_API_DOMAIN`, `MAIL_FROM_ADDRESS` | `api.mailgun.net` is on the allow-list; may ask for a card |
+| `brevo` | `MAIL_API_KEY`, `MAIL_FROM_ADDRESS` | free 300/day; **not confirmed** on the allow-list - run `check-services`, or ask PythonAnywhere to add `api.brevo.com` |
+| `resend` | `MAIL_API_KEY`, `MAIL_FROM_ADDRESS` | free tier; **not confirmed** on the allow-list - same advice |
+
+The app never pretends an email was sent: if delivery fails the code is thrown away and the person is told to try again.
+
+## After updating the code
+
+1. Upload the new files, then run `python -m flask --app run.py db upgrade` (adds two indexes; no data is changed or deleted).
+2. Add the new lines from `.env.example` to your `.env` (all have safe defaults; `TRUSTED_PROXY_COUNT=1` is recommended on PythonAnywhere).
+3. Reload the web app. Everybody is signed out once (sessions now carry a password fingerprint) - this is expected.
