@@ -1,7 +1,7 @@
 """JSON endpoints used by the chat pages. Every one checks the person is in the conversation."""
 from datetime import datetime
 
-from flask import abort, g, jsonify, request
+from flask import abort, g, jsonify, request, session
 from flask_login import current_user
 
 from ...extensions import db, limiter
@@ -174,29 +174,54 @@ def delete(message_id):
 
 
 # ------------------------------------------------------------------ Web Push
+def _push_error(code: str, status: int = 400):
+    """Same error shape as every other endpoint: {"ok": false, "error": {"code", "message"}}."""
+    return jsonify({"ok": False, "error": {"code": code, "message": t(f"push.err.{code}")}}), status
+
+
+@bp.get("/api/push/config")
+@auth_required
+def push_config():
+    """Is Web Push fully set up on the server? Reports state only; the private key is never included.
+
+    Normal people only learn "not configured". Admins also see which .env variables to fix."""
+    from ...services import push_service
+    st = push_service.vapid_status()
+    body = {"ok": True, "configured": st.configured, "publicKey": st.public if st.configured else None}
+    if not st.configured and current_user.is_admin:
+        body["missing"] = st.missing
+        body["problems"] = st.problems
+    res = jsonify(body)
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
 @bp.get("/api/push/vapid-public-key")
 @auth_required
 def push_vapid_key():
-    from ...services import push_service
-    key = push_service.public_vapid_key()
-    return jsonify({"ok": True, "publicKey": key, "configured": bool(key)})
+    """Older name of /api/push/config, kept so cached pages keep working."""
+    return push_config()
 
 
 @bp.post("/api/push/subscribe")
 @auth_required
 @limiter.limit("30 per hour")
 def push_subscribe():
+    """Save (or refresh) this browser's subscription. Safe to call again: the same endpoint is never stored twice."""
     from ...services import push_service
-    data = request.get_json(silent=True) or {}
-    endpoint = data.get("endpoint") or ""
-    keys = data.get("keys") or {}
-    p256dh = keys.get("p256dh") or data.get("p256dh") or ""
-    auth = keys.get("auth") or data.get("auth") or ""
-    ua = (request.headers.get("User-Agent") or "")[:300]
+    if not push_service.vapid_configured():
+        return _push_error("server_not_configured", 503)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _push_error("save_failed")
+    keys = data.get("keys") if isinstance(data.get("keys"), dict) else {}
     try:
-        sub = push_service.save_subscription(current_user, endpoint, p256dh, auth, ua)
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        sub = push_service.save_subscription(
+            current_user, str(data.get("endpoint") or ""), str(keys.get("p256dh") or ""),
+            str(keys.get("auth") or ""), (request.headers.get("User-Agent") or "")[:300])
+    except ValueError:
+        return _push_error("save_failed")
+    session["push_sub_id"] = sub.id           # lets logout remove exactly this browser
     return jsonify({"ok": True, "id": sub.id})
 
 
@@ -205,9 +230,10 @@ def push_subscribe():
 @limiter.limit("30 per hour")
 def push_unsubscribe():
     from ...services import push_service
-    data = request.get_json(silent=True) or {}
-    endpoint = data.get("endpoint")
-    n = push_service.remove_subscription(current_user, endpoint)
+    data = request.get_json(silent=True)
+    endpoint = data.get("endpoint") if isinstance(data, dict) else None
+    n = push_service.remove_subscription(current_user, endpoint if isinstance(endpoint, str) else None)
+    session.pop("push_sub_id", None)
     return jsonify({"ok": True, "removed": n})
 
 
@@ -215,10 +241,9 @@ def push_unsubscribe():
 @auth_required
 @limiter.limit("20 per minute")
 def push_sync():
-    """Retry pending push deliveries after the client comes back online."""
+    """Retry (a few times, bounded) pushes that failed earlier. Never creates new pushes."""
     from ...services import push_service
-    result = push_service.sync_pending_for_user(current_user.id)
-    return jsonify({"ok": True, **result})
+    return jsonify({"ok": True, **push_service.sync_pending_for_user(current_user.id)})
 
 
 @bp.post("/api/notices/mark-displayed")

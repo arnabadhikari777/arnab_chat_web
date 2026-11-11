@@ -1,4 +1,4 @@
-/* Keeps the unread counters in the bottom bar fresh (simple polling).
+/* Keeps the unread counters (the Messages tab and the top-right Notice bell) fresh (simple polling).
    Polls only while the tab is visible, one request at a time, backs off after errors, and does nothing on
    pages that have no counters (e.g. the chat room). */
 (function () {
@@ -43,6 +43,10 @@
   window.addEventListener("pageshow", (e) => { if (e.persisted) tick(); });
 
   /* The chat list already knows the unread total: it tells us, and our next request is postponed. */
-  window.appBadge = { set: show, postpone: schedule };
+  window.appBadge = { set: show, postpone: schedule, refresh: tick };
+  // The service worker tells an open page when a push arrived, so the bell updates at once.
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.type === "push-received") tick(); });
+  }
   tick();
 })();

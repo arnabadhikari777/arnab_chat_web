@@ -8,3 +8,4 @@ python-dotenv>=1.0,<2
 requests>=2.31
 pytest>=8.0,<9
 pywebpush>=1.14,<3
+cryptography>=42

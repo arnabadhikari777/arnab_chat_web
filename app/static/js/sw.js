@@ -4,7 +4,7 @@
 
    Also handles Web Push: shows notifications and opens the right page on click.
 */
-const CACHE = "goppo-v4";
+const CACHE = "goppo-v5";
 const PRECACHE = [
   "/static/css/tokens.css",
   "/static/css/base.css",
@@ -60,42 +60,64 @@ self.addEventListener("fetch", (event) => {
 });
 
 /* ---- Web Push ---- */
+// Only same-site paths are ever opened from a notification.
+function safeTarget(url) {
+  try {
+    const u = new URL(url || "/notices", self.location.origin);
+    return u.origin === self.location.origin ? u.pathname + u.search + u.hash : "/notices";
+  } catch (_) { return "/notices"; }
+}
+
 self.addEventListener("push", (event) => {
   let data = { title: "Goppo", body: "New notification", url: "/notices", tag: "goppo" };
   try {
-    if (event.data) {
-      const parsed = event.data.json();
-      data = Object.assign(data, parsed);
-    }
+    if (event.data) data = Object.assign(data, event.data.json());
   } catch (e) {
-    try {
-      data.body = event.data ? event.data.text() : data.body;
-    } catch (_) {}
+    try { data.body = event.data ? event.data.text() : data.body; } catch (_) {}
   }
-  const options = {
-    body: data.body || "",
-    icon: "/static/icons/icon-192.png",
-    badge: "/static/icons/icon-192.png",
-    tag: data.tag || "goppo",
-    renotify: !!data.renotify,
-    data: { url: data.url || "/notices", notification_id: data.notification_id },
-    vibrate: [80, 40, 80],
-  };
-  event.waitUntil(self.registration.showNotification(data.title || "Goppo", options));
+  const target = safeTarget(data.url);
+  event.waitUntil((async () => {
+    const open = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    // The app is open and in front: the in-app badge already shows it, so no duplicate system notification.
+    // The page is told to refresh its counters right away.
+    const inFront = open.filter((c) => c.visibilityState === "visible" && c.focused);
+    if (inFront.length) {
+      inFront.forEach((c) => c.postMessage({ type: "push-received", url: target }));
+      return;
+    }
+    await self.registration.showNotification(data.title || "Goppo", {
+      body: data.body || "",
+      icon: "/static/icons/icon-192.png",
+      badge: "/static/icons/icon-192.png",
+      tag: data.tag || "goppo",              // one notification per chat; a new message replaces the old one
+      renotify: !!data.renotify,
+      data: { url: target, notification_id: data.notification_id },
+      vibrate: [80, 40, 80],
+    });
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || "/notices";
-  event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const client of list) {
-        if (client.url && "focus" in client) {
-          client.navigate(target);
-          return client.focus();
-        }
-      }
-      if (clients.openWindow) return clients.openWindow(target);
-    })
-  );
+  const target = safeTarget(event.notification.data && event.notification.data.url);
+  event.waitUntil((async () => {
+    const list = await clients.matchAll({ type: "window", includeUncontrolled: true });
+    const same = list.find((c) => { try { return new URL(c.url).pathname === target.split("?")[0]; } catch (_) { return false; } });
+    const client = same || list[0];
+    if (client) {
+      try {
+        await client.focus();
+        if (!same && "navigate" in client) await client.navigate(target);
+        return;
+      } catch (_) { /* fall through and open a new window */ }
+    }
+    if (clients.openWindow) await clients.openWindow(target);
+  })());
+});
+
+// The browser replaced the subscription (expired / rotated). The worker cannot sign the request itself
+// (it has no CSRF token), so it tells open pages; push.js saves the new one on its next run.
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true })
+    .then((list) => list.forEach((c) => c.postMessage({ type: "push-subscription-changed" }))));
 });

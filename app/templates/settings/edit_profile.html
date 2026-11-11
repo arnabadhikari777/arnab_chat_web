@@ -5,6 +5,7 @@
 <header class="topbar">
   <a class="icon-btn" href="{{ url_for('settings.index') }}" aria-label="{{ t('common.back') }}"><svg class="icon"><use href="#i-back"/></svg></a>
   <span class="topbar__title">{{ t('profile.edit') }}</span>
+  {% include "partials/notice_bell.html" %}
 </header>
 <main class="page">
   {{ flashes() }}

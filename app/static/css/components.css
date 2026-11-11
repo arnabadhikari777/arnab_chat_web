@@ -180,6 +180,7 @@ dialog.dialog::backdrop { background: rgba(19, 32, 43, 0.45); }
 .tile { position: relative; display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4);
   border-radius: var(--r-card); background: var(--c-bg); color: var(--c-ink); text-decoration: none; font-weight: 700; }
 .tile .icon { color: var(--c-primary); }
+@media (max-width: 899px) { .tiles > .tile:last-child:nth-child(odd) { grid-column: 1 / -1; } }   /* 3 tiles: the last one spans the row */
 .tile .badge { position: absolute; top: var(--s-3); right: var(--s-3); }
 .list-item--unread .list-item__name, .list-item--unread .list-item__text { color: var(--c-ink); font-weight: 700; }
 .list-item--unread .list-item__time { color: var(--c-primary); font-weight: 700; }

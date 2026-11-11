@@ -25,6 +25,8 @@ Then fill in Gmail and Cloudinary (below), and put **your own email in `ADMIN_EM
 export FLASK_APP=run.py            # Windows: set FLASK_APP=run.py
 flask db upgrade                   # creates instance/chat.db
 flask check-services               # tests Gmail + Cloudinary without sending anything
+flask generate-vapid-keys          # new Web Push key pair for .env
+flask push-status                  # says exactly which Web Push setting is missing or wrong
 python run.py                      # http://localhost:5000
 ```
 
@@ -45,7 +47,8 @@ the role is removed at the next login.
 ## Tests
 
 ```bash
-python -m pytest -q                        # 359 tests
+python -m pytest -q                        # includes tests/test_push.py and tests/test_vapid.py
+node --test tests/browser/push_state.test.js   # push.js logic, no npm install needed
 cd tests/browser && npm install && ./run.sh   # 55 checks: the real JavaScript in jsdom (needs Node 18+)
 ```
 

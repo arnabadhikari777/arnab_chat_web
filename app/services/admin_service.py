@@ -1,7 +1,7 @@
 """Admin actions. Every change is written to the audit log. Admins never read chat text."""
 from datetime import timedelta
 
-from flask import url_for
+from flask import current_app, url_for
 from sqlalchemy import func, or_
 
 from ..extensions import db
@@ -130,9 +130,11 @@ def create_announcement(admin: User, form) -> Announcement:
     try:
         from . import push_service
         if push_service.vapid_configured() and recipients:
+            # Inline pushes would hold this request open, so only the first few go out now. Everyone
+            # still gets the notice in their Notice Box (and the bell badge).
             notes = (
                 Notification.query.filter_by(type="announcement", dedupe_key=f"announcement:{ann.id}")
-                .limit(200)
+                .limit(int(current_app.config.get("PUSH_ANNOUNCEMENT_INLINE_LIMIT", 40)))
                 .all()
             )
             for note in notes:

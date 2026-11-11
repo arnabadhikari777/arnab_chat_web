@@ -1,0 +1,5 @@
+{# The ONE way into the Notice Box: the bell in the top-right corner. Its badge is filled by badge.js. #}
+<a class="icon-btn topbar__notice" href="{{ url_for('notices.index') }}" aria-label="{{ t('nav.notices') }}"{% if request.endpoint == 'notices.index' %} aria-current="page"{% endif %}>
+  <svg class="icon"><use href="#i-bell"/></svg>
+  <span class="nav-badge badge hidden" data-badge="notices"></span>
+</a>

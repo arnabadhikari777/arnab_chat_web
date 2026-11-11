@@ -44,3 +44,29 @@ def register_cli(app) -> None:
                 click.echo(f"Cloudinary: FAILED ({exc.__class__.__name__}: {exc})")
         else:
             click.echo("Cloudinary: not configured (CLOUDINARY_* values)")
+
+
+    @app.cli.command("generate-vapid-keys")
+    def generate_vapid_keys():
+        """Print a fresh VAPID key pair for Web Push. Put BOTH lines in .env (never share the private one)."""
+        from .services import vapid
+
+        private, public = vapid.generate_keypair()
+        click.echo(f"VAPID_PRIVATE_KEY={private}")
+        click.echo(f"VAPID_PUBLIC_KEY={public}")
+        click.echo("VAPID_CONTACT=mailto:your-real-email@gmail.com   # edit this one yourself")
+
+    @app.cli.command("push-status")
+    def push_status():
+        """Say exactly which Web Push setting is missing or wrong."""
+        from .services import push_service
+
+        st = push_service.vapid_status()
+        if st.configured:
+            click.echo("Web Push: configured. (Keys match; contact looks valid.)")
+            return
+        for name in st.missing:
+            click.echo(f"MISSING  {name}")
+        for problem in st.problems:
+            click.echo(f"PROBLEM  {problem}")
+        click.echo("Fix .env, reload the web app, then run this again. New keys: flask generate-vapid-keys")

@@ -175,6 +175,12 @@ def login():
 
 @bp.post("/logout")
 def logout():
+    if current_user.is_authenticated:
+        try:
+            from ...services import push_service
+            push_service.forget_session_subscription(current_user, session.get("push_sub_id"))
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception("could not remove push subscription on logout")
     logout_user()
     keep = {k: session[k] for k in ("lang",) if k in session}
     session.clear()                      # nothing of the old session survives a logout

@@ -70,20 +70,34 @@ def _existing(user_id: int, client_uuid: str):
 
 
 def _after_send(user: User, conv: Conversation, msg: Message) -> None:
+    """The message is committed first, so nothing that goes wrong with a notice or a push can lose it."""
     conv.last_message_at = msg.created_at
-    note = None
-    other = db.session.get(User, conv.other_user_id(user.id))
-    if other and other.is_active:
-        note = notification_service.upsert_message_notice(other, user, conv)
     db.session.commit()
     get_backend().publish("message", conv.id, {"id": msg.id})
-    # Web Push after commit so a push failure never rolls back the message.
+    other = db.session.get(User, conv.other_user_id(user.id))
+    if not (other and other.is_active):
+        return
+    note = _notify_recipient(other, user, conv)
     if note is not None:
+        from . import push_service
+        push_service.notify_after_commit(note, force=True)    # new activity: send again with the new count
+
+
+def _notify_recipient(other: User, user: User, conv: Conversation):
+    """One notice per chat. Two messages at the same moment could both try to create it (unique key):
+    the loser rolls back only the notice and retries as an update."""
+    for _ in range(2):
         try:
-            from . import push_service
-            push_service.notify_after_commit(note)
+            note = notification_service.upsert_message_notice(other, user, conv)
+            db.session.commit()
+            return note
+        except IntegrityError:
+            db.session.rollback()
         except Exception:  # noqa: BLE001
-            pass
+            db.session.rollback()
+            current_app.logger.exception("message notice failed for conversation %s", conv.id)
+            return None
+    return None
 
 
 # ------------------------------------------------------------------ sending

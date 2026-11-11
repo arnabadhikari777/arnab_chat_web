@@ -3,10 +3,7 @@
 {% block title %}{{ t('nav.people') }} - {{ app_name }}{% endblock %}
 {% block app %}
 <header class="topbar"><span class="topbar__title">{{ t('nav.people') }}</span>
-  <a class="icon-btn topbar__notice" href="{{ url_for('notices.index') }}" aria-label="{{ t('nav.notices') }}">
-    <svg class="icon"><use href="#i-bell"/></svg>
-    <span class="nav-badge badge hidden" data-badge="notices"></span>
-  </a>
+  {% include "partials/notice_bell.html" %}
 </header>
 <main class="page page--flush">
   <form class="search" method="get" action="{{ url_for('people.index') }}" role="search">

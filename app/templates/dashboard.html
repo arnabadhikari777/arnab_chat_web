@@ -3,10 +3,7 @@
 {% block app %}
 <header class="topbar">
   <span class="topbar__title">{{ app_name }}</span>
-  <a class="icon-btn topbar__notice" href="{{ url_for('notices.index') }}" aria-label="{{ t('nav.notices') }}">
-    <svg class="icon"><use href="#i-bell"/></svg>
-    <span class="nav-badge badge hidden" data-badge="notices"></span>
-  </a>
+  {% include "partials/notice_bell.html" %}
 </header>
 <main class="page page--flush">
   <div class="cover cover--{{ 'abcde'[current_user.id % 5] }}">
@@ -23,7 +20,6 @@
     <div class="tiles">
       <a class="tile" href="{{ url_for('chat.inbox') }}"><svg class="icon"><use href="#i-chat"/></svg>{{ t('nav.messages') }}<span class="badge hidden" data-badge="messages"></span></a>
       <a class="tile" href="{{ url_for('people.index') }}"><svg class="icon"><use href="#i-people"/></svg>{{ t('nav.people') }}</a>
-      <a class="tile" href="{{ url_for('notices.index') }}"><svg class="icon"><use href="#i-bell"/></svg>{{ t('nav.notices') }}<span class="badge hidden" data-badge="notices"></span></a>
       <a class="tile" href="{{ url_for('settings.index') }}"><svg class="icon"><use href="#i-settings"/></svg>{{ t('nav.settings') }}</a>
     </div>
     {% if current_user.is_admin %}<a class="btn btn--block" href="{{ url_for('admin.dashboard') }}"><svg class="icon"><use href="#i-shield"/></svg>{{ t('admin.title') }}</a>{% endif %}

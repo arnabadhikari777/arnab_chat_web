@@ -86,8 +86,8 @@ def mark_read(user_id: int, notification_id: int):
     return note
 
 
-def describe(note: Notification) -> dict:
-    """Turn a stored notification into text in the reader's language."""
+def describe(note: Notification, lang: str | None = None) -> dict:
+    """Turn a stored notification into text in the reader's language (or `lang`, e.g. for a push)."""
     p = note.payload or {}
     app_name = current_app.config["APP_NAME"]
     name = p.get("full_name", "")
@@ -97,17 +97,17 @@ def describe(note: Notification) -> dict:
             "announcement": "i-bell", "password_changed": "i-lock"}.get(kind, "i-bell")
     if kind == "new_message":
         count = int(p.get("count", 1))
-        text = t("notice.new_messages", name=name, count=count) if count > 1 else t("notice.new_message", name=name)
+        text = t("notice.new_messages", lang=lang, name=name, count=count) if count > 1 else t("notice.new_message", lang=lang, name=name)
         return {"text": text, "icon": icon}
     if kind == "announcement":
         ann = db.session.get(Announcement, p.get("announcement_id"))
         if ann:
             from ..i18n import get_language
-            bn = get_language() == "bn" and ann.title_bn
+            bn = (lang or get_language()) == "bn" and ann.title_bn
             return {"text": ann.title_bn if bn else ann.title, "icon": icon,
                     "detail": url_for("notices.announcement", announcement_id=ann.id)}
-        return {"text": t("notice.announcement_gone"), "icon": icon}
-    return {"text": t(f"notice.{kind}", name=name, app=app_name), "icon": icon}
+        return {"text": t("notice.announcement_gone", lang=lang), "icon": icon}
+    return {"text": t(f"notice.{kind}", lang=lang, name=name, app=app_name), "icon": icon}
 
 
 def mark_displayed(user_id: int, notification_ids: list[int]) -> int:

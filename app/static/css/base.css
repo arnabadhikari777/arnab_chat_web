@@ -42,7 +42,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .bottom-nav { position: sticky; bottom: 0; height: var(--nav-h); display: grid;
   grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--c-surface);
   border-top: 1px solid var(--c-line); padding-bottom: env(safe-area-inset-bottom); }
-.bottom-nav a { display: flex; flex-direction: column; align-items: center; justify-content: center;
+.bottom-nav a { min-width: 0; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2px; color: var(--c-ink-3); text-decoration: none; font-size: var(--fs-xs); font-weight: 600; }
 .bottom-nav a[aria-current="page"] { color: var(--c-primary); }
 
@@ -76,7 +76,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
   .topbar { padding: 0 var(--s-6); }
   .profile-body { max-width: 560px; margin: 0 auto; padding-bottom: var(--s-6); }
   .cover { height: 220px; }
-  .tiles { grid-template-columns: repeat(4, 1fr); }
+  .tiles { grid-template-columns: repeat(3, 1fr); }
   .chat-screen { max-width: none; }
   .list-item { padding-left: var(--s-5); padding-right: var(--s-5); }
 }

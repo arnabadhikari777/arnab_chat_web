@@ -4,6 +4,7 @@
 {% block app %}
 <header class="topbar">
   <span class="topbar__title">{{ t('nav.notices') }}</span>
+  {% include "partials/notice_bell.html" %}
 </header>
 <main class="page page--flush">
   <div class="page__inner">{{ flashes() }}</div>
@@ -35,7 +36,7 @@
     </div>
   {% endif %}
 </main>
-{% with active='notices' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% with active='' %}{% include "partials/bottom_nav.html" %}{% endwith %}
 {% endblock %}
 {% block scripts %}
 <script>

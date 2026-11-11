@@ -151,14 +151,14 @@ class Config:
     LOGIN_ACCOUNT_LIMIT = env_str("LOGIN_ACCOUNT_LIMIT", "8 per 15 minutes")
 
     # ---- Web Push (VAPID) ----
-    # Generate with: python -c "from py_vapid import Vapid01; v=Vapid01(); v.generate_keys(); print(v.private_pem().decode()); print(v.public_key.public_bytes(...))"
-    # Or use: npx web-push generate-vapid-keys
+    # ALL THREE are required. Create the pair with:  flask generate-vapid-keys   then check with:  flask push-status
     VAPID_PRIVATE_KEY = env_str("VAPID_PRIVATE_KEY")
     VAPID_PUBLIC_KEY = env_str("VAPID_PUBLIC_KEY")
-    # mailto: or https: contact for the VAPID claim
-    VAPID_CONTACT = env_str("VAPID_CONTACT", "mailto:admin@example.com")
-    # How long the push service should keep a message if the device is offline (seconds).
-    PUSH_TTL_SECONDS = env_int("PUSH_TTL_SECONDS", 86400)
+    VAPID_CONTACT = env_str("VAPID_CONTACT")          # mailto:you@gmail.com (a real address) or https://your-site
+    PUSH_TTL_SECONDS = env_int("PUSH_TTL_SECONDS", 86400)              # how long a push service keeps it for an offline phone
+    PUSH_SEND_TIMEOUT_SECONDS = env_int("PUSH_SEND_TIMEOUT_SECONDS", 6)
+    PUSH_MAX_DEVICES_PER_USER = env_int("PUSH_MAX_DEVICES_PER_USER", 5)
+    PUSH_ANNOUNCEMENT_INLINE_LIMIT = env_int("PUSH_ANNOUNCEMENT_INLINE_LIMIT", 40)
 
     # ---- Math Class SSO ----
     SSO_SHARED_SECRET = env_str("SSO_SHARED_SECRET")
