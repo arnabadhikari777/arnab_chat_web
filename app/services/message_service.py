@@ -71,11 +71,19 @@ def _existing(user_id: int, client_uuid: str):
 
 def _after_send(user: User, conv: Conversation, msg: Message) -> None:
     conv.last_message_at = msg.created_at
+    note = None
     other = db.session.get(User, conv.other_user_id(user.id))
     if other and other.is_active:
-        notification_service.upsert_message_notice(other, user, conv)
+        note = notification_service.upsert_message_notice(other, user, conv)
     db.session.commit()
     get_backend().publish("message", conv.id, {"id": msg.id})
+    # Web Push after commit so a push failure never rolls back the message.
+    if note is not None:
+        try:
+            from . import push_service
+            push_service.notify_after_commit(note)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # ------------------------------------------------------------------ sending

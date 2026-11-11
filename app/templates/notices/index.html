@@ -2,17 +2,18 @@
 {% from "partials/macros.html" import flashes, csrf with context %}
 {% block title %}{{ t('nav.notices') }} - {{ app_name }}{% endblock %}
 {% block app %}
-<header class="topbar"><span class="topbar__title">{{ t('nav.notices') }}</span></header>
+<header class="topbar">
+  <span class="topbar__title">{{ t('nav.notices') }}</span>
+</header>
 <main class="page page--flush">
   <div class="page__inner">{{ flashes() }}</div>
   {% if items %}
-    <form method="post" action="{{ url_for('notices.read_all') }}" class="notice-actions">
-      {{ csrf() }}
-      <button class="btn btn--secondary" type="submit" {% if not unread %}disabled{% endif %}><svg class="icon"><use href="#i-check2"/></svg>{{ t('notice.mark_all') }}</button>
-    </form>
-    <div class="list">
+    <div class="list" id="notice-list" data-mark-url="{{ url_for('chat.notices_mark_displayed') }}">
       {% for it in items %}
-        <a class="list-item notice {% if not it.note.is_read %}notice--unread{% endif %}" href="{{ url_for('notices.go', notification_id=it.note.id) }}">
+        <a class="list-item notice {% if not it.note.is_read %}notice--unread{% endif %}"
+           href="{{ url_for('notices.go', notification_id=it.note.id) }}"
+           data-notice-id="{{ it.note.id }}"
+           data-unread="{{ 0 if it.note.is_read else 1 }}">
           <span class="notice__icon"><svg class="icon"><use href="#{{ it.icon }}"/></svg></span>
           <span class="list-item__main">
             <span class="notice__text">{{ it.text }}</span>
@@ -35,4 +36,30 @@
   {% endif %}
 </main>
 {% with active='notices' %}{% include "partials/bottom_nav.html" %}{% endwith %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const list = document.getElementById("notice-list");
+  if (!list || !window.app) return;
+  const ids = Array.from(list.querySelectorAll("[data-notice-id][data-unread='1']"))
+    .map((el) => Number(el.dataset.noticeId))
+    .filter(Boolean);
+  if (!ids.length) return;
+  window.app.api(list.dataset.markUrl, {
+    method: "POST",
+    body: JSON.stringify({ ids: ids }),
+  }).then((res) => {
+    if (!res.ok) return;
+    list.querySelectorAll(".notice--unread").forEach((el) => {
+      el.classList.remove("notice--unread");
+      const dot = el.querySelector(".notice__dot");
+      if (dot) dot.remove();
+    });
+    if (window.appBadge && res.data && typeof res.data.notices === "number") {
+      window.appBadge.set("notices", res.data.notices);
+    }
+  }).catch(function () {});
+})();
+</script>
 {% endblock %}

@@ -45,7 +45,7 @@ def edit_profile():
             errors = exc.errors
         else:
             flash("flash.profile_saved", "success")
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.profile"))
     return render_template(
         "settings/edit_profile.html", errors=errors, form=request.form, max_mb=_max_mb()
     )

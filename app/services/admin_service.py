@@ -126,6 +126,19 @@ def create_announcement(admin: User, form) -> Announcement:
     ])
     audit(admin, "announcement.create", "announcement", ann.id, {"recipients": len(recipients)})
     db.session.commit()
+    # Best-effort push for announcement notices (capped to avoid long request on free hosts).
+    try:
+        from . import push_service
+        if push_service.vapid_configured() and recipients:
+            notes = (
+                Notification.query.filter_by(type="announcement", dedupe_key=f"announcement:{ann.id}")
+                .limit(200)
+                .all()
+            )
+            for note in notes:
+                push_service.notify_after_commit(note)
+    except Exception:  # noqa: BLE001
+        pass
     return ann
 
 

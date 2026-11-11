@@ -10,19 +10,26 @@ from ..utils.time import utcnow
 PAGE_SIZE = 30
 
 
-def add_notification(user_id: int, type_: str, payload: dict, link: str | None, dedupe_key: str) -> None:
-    """Queue a notification (caller commits). The same dedupe_key is never stored twice."""
-    if Notification.query.filter_by(user_id=user_id, dedupe_key=dedupe_key).first():
-        return
-    db.session.add(
-        Notification(user_id=user_id, type=type_, payload=payload, link=link, dedupe_key=dedupe_key)
-    )
+def add_notification(user_id: int, type_: str, payload: dict, link: str | None, dedupe_key: str) -> Notification | None:
+    """Queue a notification (caller commits). The same dedupe_key is never stored twice.
+
+    Returns the new Notification or None if it was a duplicate.
+    """
+    existing = Notification.query.filter_by(user_id=user_id, dedupe_key=dedupe_key).first()
+    if existing:
+        return None
+    note = Notification(user_id=user_id, type=type_, payload=payload, link=link, dedupe_key=dedupe_key)
+    db.session.add(note)
+    return note
 
 
-def upsert_message_notice(recipient, sender, conversation) -> None:
-    """ONE notice per chat: more messages raise its counter instead of adding rows."""
+def upsert_message_notice(recipient, sender, conversation) -> Notification | None:
+    """ONE notice per chat: more messages raise its counter instead of adding rows.
+
+    Returns the notification row so the caller can trigger a Web Push after commit.
+    """
     if not recipient.notify_messages:
-        return
+        return None
     key = f"msg:{conversation.id}"
     note = Notification.query.filter_by(user_id=recipient.id, dedupe_key=key).first()
     base = {
@@ -30,15 +37,17 @@ def upsert_message_notice(recipient, sender, conversation) -> None:
         "username": sender.username, "full_name": sender.full_name,
     }
     if note is None:
-        db.session.add(Notification(
+        note = Notification(
             user_id=recipient.id, type="new_message", payload={**base, "count": 1},
             link=url_for("chat.room", conversation_id=conversation.id), dedupe_key=key,
-        ))
-        return
+        )
+        db.session.add(note)
+        return note
     count = 1 if note.is_read else int(note.payload.get("count", 1)) + 1
     note.payload = {**base, "count": count}
     note.is_read = False
     note.created_at = utcnow()
+    return note
 
 
 def clear_message_notice(user_id: int, conversation_id: int) -> int:
@@ -99,3 +108,18 @@ def describe(note: Notification) -> dict:
                     "detail": url_for("notices.announcement", announcement_id=ann.id)}
         return {"text": t("notice.announcement_gone"), "icon": icon}
     return {"text": t(f"notice.{kind}", name=name, app=app_name), "icon": icon}
+
+
+def mark_displayed(user_id: int, notification_ids: list[int]) -> int:
+    """Mark only the given notification ids as read (those actually shown in the box)."""
+    if not notification_ids:
+        return 0
+    n = (
+        Notification.query.filter(
+            Notification.user_id == user_id,
+            Notification.id.in_(notification_ids),
+            Notification.is_read.is_(False),
+        ).update({"is_read": True}, synchronize_session=False)
+    )
+    db.session.commit()
+    return n

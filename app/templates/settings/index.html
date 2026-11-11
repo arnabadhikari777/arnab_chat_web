@@ -2,7 +2,13 @@
 {% from "partials/macros.html" import err, flashes, csrf with context %}
 {% block title %}{{ t('nav.settings') }} - {{ app_name }}{% endblock %}
 {% block app %}
-<header class="topbar"><span class="topbar__title">{{ t('nav.settings') }}</span></header>
+<header class="topbar">
+  <span class="topbar__title">{{ t('nav.settings') }}</span>
+  <a class="icon-btn topbar__notice" href="{{ url_for('notices.index') }}" aria-label="{{ t('nav.notices') }}">
+    <svg class="icon"><use href="#i-bell"/></svg>
+    <span class="nav-badge badge hidden" data-badge="notices"></span>
+  </a>
+</header>
 <main class="page">
   {{ flashes() }}
   <section class="stack">
@@ -42,6 +48,28 @@
       <p class="field__hint">{{ t('settings.notify_hint') }}</p>
       <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
     </form>
+  </section>
+
+  <section class="stack" id="push-settings"
+    data-msg-on="Push notifications are on"
+    data-msg-off="Push notifications are off"
+    data-msg-denied="Permission denied. Enable notifications in your browser site settings."
+    data-msg-unsupported="Push notifications are not supported in this browser."
+    data-msg-granted="Permission granted — tap Enable to finish setup">
+    <h3>Push notifications</h3>
+    <p class="muted" data-push-status>Checking…</p>
+    <p class="field__hint hidden" data-push-help>
+      Notifications were blocked for this site. Open your browser’s site settings and allow notifications, then return here.
+    </p>
+    <button type="button" class="btn btn--block hidden" data-push-enable>Enable push notifications</button>
+    <button type="button" class="btn btn--secondary btn--block hidden" data-push-disable>Disable push notifications</button>
+  </section>
+
+  <section class="stack">
+    <h3>Install app</h3>
+    <p class="muted">Install Goppo on your device for a faster, app-like experience.</p>
+    <button type="button" class="btn btn--secondary btn--block hidden" data-pwa-install>Install app</button>
+    <p class="field__hint">If the button is hidden, the app is already installed or this browser does not support installation prompts.</p>
   </section>
 
   <section class="stack">

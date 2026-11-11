@@ -12,7 +12,16 @@ from . import bp
 def home():
     if not current_user.is_authenticated:
         return redirect(url_for("auth.login"))
+    # Default landing is the Messages page (chat inbox).
+    return redirect(url_for("chat.inbox"))
+
+@bp.get("/profile")
+def profile():
+    """Own profile page (cover, email, tiles)."""
+    if not current_user.is_authenticated:
+        return redirect(url_for("auth.login"))
     return render_template("dashboard.html")
+
 
 
 @bp.get("/lang/<code>")

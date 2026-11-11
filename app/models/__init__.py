@@ -2,6 +2,7 @@ from .chat import Conversation, Message, MessageAttachment, MessageDeletion
 from .social import MessageRequest, Notification
 from .system import Announcement, AdminAuditLog, OtpVerification, Report
 from .user import User
+from .push import PushSubscription, PushDelivery
 
 __all__ = [
     "User",
@@ -15,4 +16,6 @@ __all__ = [
     "Announcement",
     "Report",
     "AdminAuditLog",
+    "PushSubscription",
+    "PushDelivery",
 ]

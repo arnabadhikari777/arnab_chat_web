@@ -171,3 +171,70 @@ def delete(message_id):
     else:
         return _error(ServiceError("msg.bad_request"))
     return jsonify({"ok": True, "id": msg.id, "scope": scope})
+
+
+# ------------------------------------------------------------------ Web Push
+@bp.get("/api/push/vapid-public-key")
+@auth_required
+def push_vapid_key():
+    from ...services import push_service
+    key = push_service.public_vapid_key()
+    return jsonify({"ok": True, "publicKey": key, "configured": bool(key)})
+
+
+@bp.post("/api/push/subscribe")
+@auth_required
+@limiter.limit("30 per hour")
+def push_subscribe():
+    from ...services import push_service
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint") or ""
+    keys = data.get("keys") or {}
+    p256dh = keys.get("p256dh") or data.get("p256dh") or ""
+    auth = keys.get("auth") or data.get("auth") or ""
+    ua = (request.headers.get("User-Agent") or "")[:300]
+    try:
+        sub = push_service.save_subscription(current_user, endpoint, p256dh, auth, ua)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "id": sub.id})
+
+
+@bp.post("/api/push/unsubscribe")
+@auth_required
+@limiter.limit("30 per hour")
+def push_unsubscribe():
+    from ...services import push_service
+    data = request.get_json(silent=True) or {}
+    endpoint = data.get("endpoint")
+    n = push_service.remove_subscription(current_user, endpoint)
+    return jsonify({"ok": True, "removed": n})
+
+
+@bp.post("/api/push/sync")
+@auth_required
+@limiter.limit("20 per minute")
+def push_sync():
+    """Retry pending push deliveries after the client comes back online."""
+    from ...services import push_service
+    result = push_service.sync_pending_for_user(current_user.id)
+    return jsonify({"ok": True, **result})
+
+
+@bp.post("/api/notices/mark-displayed")
+@auth_required
+@limiter.limit("60 per minute")
+def notices_mark_displayed():
+    """Mark only the notification ids that were shown in the notification box as read."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") or []
+    if not isinstance(ids, list):
+        return jsonify({"ok": False, "error": "bad_ids"}), 400
+    clean = []
+    for x in ids[:100]:
+        try:
+            clean.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    n = notification_service.mark_displayed(current_user.id, clean)
+    return jsonify({"ok": True, "marked": n, "notices": notification_service.unread_count(current_user.id)})

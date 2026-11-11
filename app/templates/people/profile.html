@@ -14,6 +14,7 @@
     <div class="profile-body__avatar">{{ avatar(person, 'avatar--lg avatar--ring') }}</div>
     <h1 class="profile-body__name">{{ person.full_name }}</h1>
     <div class="row"><span class="muted">@{{ person.username }}</span>{{ account_chip(person) }}</div>
+    {% if is_me %}<p class="muted profile-email">{{ person.email }}</p>{% endif %}
     <p class="bio">{% if person.bio %}{{ person.bio }}{% else %}<span class="muted">{{ t('profile.no_bio') }}</span>{% endif %}</p>
 
     {{ flashes() }}

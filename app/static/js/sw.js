@@ -1,7 +1,10 @@
 /* Goppo service worker.
    Privacy rule: pages, API answers and anything personal are NEVER cached. Only public static files
-   (css, js, icons, manifest) are kept, so the app opens fast and shows a tiny offline notice. */
-const CACHE = "goppo-v3";            // new name: the activate step below deletes the old caches (they held pages)
+   (css, js, icons, manifest) are kept, so the app opens fast and shows a tiny offline notice.
+
+   Also handles Web Push: shows notifications and opens the right page on click.
+*/
+const CACHE = "goppo-v4";
 const PRECACHE = [
   "/static/css/tokens.css",
   "/static/css/base.css",
@@ -29,7 +32,6 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-/* The page tells us to wipe everything when the person logs out. */
 self.addEventListener("message", (event) => {
   if (event.data === "clear-caches") {
     event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))));
@@ -42,7 +44,6 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Public static files: network first (never a stale buggy file), cache only as an offline fallback.
   if (url.pathname.startsWith("/static/") && !url.pathname.startsWith("/static/uploads/")) {
     event.respondWith(
       fetch(req).then((res) => {
@@ -53,9 +54,48 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Pages: always the network. Offline = a plain notice that contains no private data.
   if (req.mode === "navigate") {
     event.respondWith(fetch(req).catch(() => caches.match("/static/offline.html")));
   }
-  // Everything else (/api/..., /i18n/..., forms) is not touched: the browser handles it normally.
+});
+
+/* ---- Web Push ---- */
+self.addEventListener("push", (event) => {
+  let data = { title: "Goppo", body: "New notification", url: "/notices", tag: "goppo" };
+  try {
+    if (event.data) {
+      const parsed = event.data.json();
+      data = Object.assign(data, parsed);
+    }
+  } catch (e) {
+    try {
+      data.body = event.data ? event.data.text() : data.body;
+    } catch (_) {}
+  }
+  const options = {
+    body: data.body || "",
+    icon: "/static/icons/icon-192.png",
+    badge: "/static/icons/icon-192.png",
+    tag: data.tag || "goppo",
+    renotify: !!data.renotify,
+    data: { url: data.url || "/notices", notification_id: data.notification_id },
+    vibrate: [80, 40, 80],
+  };
+  event.waitUntil(self.registration.showNotification(data.title || "Goppo", options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/notices";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url && "focus" in client) {
+          client.navigate(target);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(target);
+    })
+  );
 });
