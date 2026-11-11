@@ -9,7 +9,11 @@
 <main class="page page--flush">
   <div class="page__inner">{{ flashes() }}</div>
   {% if items %}
-    <div class="list" id="notice-list" data-mark-url="{{ url_for('chat.notices_mark_displayed') }}">
+    <div class="notice-actions">
+      <button type="button" class="btn btn--ghost" id="notice-clear"
+              data-url="{{ url_for('chat.notices_clear_all') }}">{{ t('notice.clear_all') }}</button>
+    </div>
+    <div class="list" id="notice-list" data-mark-url="{{ url_for('chat.notices_read_all') }}" data-unread="{{ unread }}">
       {% for it in items %}
         <a class="list-item notice {% if not it.note.is_read %}notice--unread{% endif %}"
            href="{{ url_for('notices.go', notification_id=it.note.id) }}"
@@ -43,24 +47,41 @@
 (function () {
   const list = document.getElementById("notice-list");
   if (!list || !window.app) return;
-  const ids = Array.from(list.querySelectorAll("[data-notice-id][data-unread='1']"))
-    .map((el) => Number(el.dataset.noticeId))
-    .filter(Boolean);
-  if (!ids.length) return;
-  window.app.api(list.dataset.markUrl, {
-    method: "POST",
-    body: JSON.stringify({ ids: ids }),
-  }).then((res) => {
-    if (!res.ok) return;
-    list.querySelectorAll(".notice--unread").forEach((el) => {
-      el.classList.remove("notice--unread");
-      const dot = el.querySelector(".notice__dot");
-      if (dot) dot.remove();
+
+  /* Opening the Notice Box marks EVERY unread notice of this person as read (one server-side update). */
+  if (Number(list.dataset.unread) > 0) {
+    window.app.api(list.dataset.markUrl, { method: "POST", json: {} }).then((res) => {
+      if (!res.ok) return;
+      list.querySelectorAll(".notice--unread").forEach((el) => {
+        el.classList.remove("notice--unread");
+        const dot = el.querySelector(".notice__dot");
+        if (dot) dot.remove();
+      });
+      if (window.appBadge && typeof res.data.notices === "number") window.appBadge.set("notices", res.data.notices);
+    }).catch(function () {});
+  }
+
+  /* Clear all: asks first, then permanently deletes this person's own notifications. */
+  const clear = document.getElementById("notice-clear");
+  if (!clear) return;
+  clear.addEventListener("click", async () => {
+    if (clear.disabled) return;                      // no double submit
+    const yes = await window.app.confirmDialog({
+      title: window.app.t("notice.clear_title"), text: window.app.t("notice.clear_text"),
+      confirmLabel: window.app.t("notice.clear_confirm"), danger: true,
     });
-    if (window.appBadge && res.data && typeof res.data.notices === "number") {
-      window.appBadge.set("notices", res.data.notices);
+    if (!yes) return;
+    clear.disabled = true;
+    const res = await window.app.api(clear.dataset.url, { method: "POST", json: {} });
+    if (!res.ok) {
+      clear.disabled = false;
+      window.app.toast(res.error && res.error.message ? res.error.message : window.app.t("toast.something_wrong"), "error");
+      return;
     }
-  }).catch(function () {});
+    if (window.appBadge) window.appBadge.set("notices", 0);
+    window.app.toast(window.app.t("notice.cleared"));
+    window.location.reload();
+  });
 })();
 </script>
 {% endblock %}

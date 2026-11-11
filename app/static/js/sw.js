@@ -4,7 +4,7 @@
 
    Also handles Web Push: shows notifications and opens the right page on click.
 */
-const CACHE = "goppo-v5";
+const CACHE = "goppo-v6";
 const PRECACHE = [
   "/static/css/tokens.css",
   "/static/css/base.css",
@@ -68,6 +68,31 @@ function safeTarget(url) {
   } catch (_) { return "/notices"; }
 }
 
+/* Delivery acknowledgement. Sent ONLY after this worker really processed the push (the notification was shown,
+   or an open page was told). It proves the device/browser received it, not that a person looked at it.
+   The single-use token came inside the push itself; the server checks it, the device endpoint and the owner.
+   No cookies are sent (credentials omitted): the token is the proof. One retry for a network hiccup. */
+async function sendAck(ack) {
+  if (!ack || !ack.id || !ack.token) return;           // an older push without a token: nothing to acknowledge
+  let endpoint = "";
+  try {
+    const sub = await self.registration.pushManager.getSubscription();
+    endpoint = sub ? sub.endpoint : "";
+  } catch (_) { /* no endpoint: the server will refuse, and that is the safe outcome */ }
+  if (!endpoint) return;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch("/api/push/ack", {
+        method: "POST", credentials: "omit", keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: ack.id, token: ack.token, endpoint }),
+      });
+      if (res.status < 500) return;                    // accepted, or refused for good (4xx): never retry a refusal
+    } catch (_) { /* offline: try once more */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
 self.addEventListener("push", (event) => {
   let data = { title: "Goppo", body: "New notification", url: "/notices", tag: "goppo" };
   try {
@@ -79,10 +104,12 @@ self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     const open = await clients.matchAll({ type: "window", includeUncontrolled: true });
     // The app is open and in front: the in-app badge already shows it, so no duplicate system notification.
-    // The page is told to refresh its counters right away.
+    // The page is told to refresh its counters right away. The push WAS received and handed to the page,
+    // so it is acknowledged; if telling the page throws, nothing is acknowledged.
     const inFront = open.filter((c) => c.visibilityState === "visible" && c.focused);
     if (inFront.length) {
       inFront.forEach((c) => c.postMessage({ type: "push-received", url: target }));
+      await sendAck(data.ack);
       return;
     }
     await self.registration.showNotification(data.title || "Goppo", {
@@ -94,6 +121,7 @@ self.addEventListener("push", (event) => {
       data: { url: target, notification_id: data.notification_id },
       vibrate: [80, 40, 80],
     });
+    await sendAck(data.ack);                 // only reached if showNotification succeeded
   })());
 });
 

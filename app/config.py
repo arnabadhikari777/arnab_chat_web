@@ -159,6 +159,9 @@ class Config:
     PUSH_SEND_TIMEOUT_SECONDS = env_int("PUSH_SEND_TIMEOUT_SECONDS", 6)
     PUSH_MAX_DEVICES_PER_USER = env_int("PUSH_MAX_DEVICES_PER_USER", 5)
     PUSH_ANNOUNCEMENT_INLINE_LIMIT = env_int("PUSH_ANNOUNCEMENT_INLINE_LIMIT", 40)
+    # An acknowledgement token stays valid for PUSH_TTL_SECONDS + this many seconds (a phone that was off
+    # receives the push late, so the token must outlive the push service queue time).
+    PUSH_ACK_EXTRA_SECONDS = env_int("PUSH_ACK_EXTRA_SECONDS", 300)
 
     # ---- Math Class SSO ----
     SSO_SHARED_SECRET = env_str("SSO_SHARED_SECRET")

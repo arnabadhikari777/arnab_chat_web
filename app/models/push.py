@@ -46,6 +46,14 @@ class PushDelivery(db.Model):
       accepted  – push service accepted the payload (does NOT mean user saw it)
       failed    – temporary or permanent failure
       expired   – subscription no longer valid
+
+    "accepted" still only means the push service took the payload. A message becomes Delivered only
+    after the device's service worker sends a valid acknowledgement (see push_service.ack_delivery):
+      ack_token_hash   – SHA-256 of a random single-use token that was inside the push payload
+      acked_at         – when a valid acknowledgement arrived (device/browser receipt, NOT human attention)
+      acked_upto_id    – newest message id that acknowledgement covers
+      applied_upto_id  – newest message id already turned into "delivered" (so an ack that arrives while
+                         the person is offline can be applied later, and repeating it changes nothing)
     """
 
     __tablename__ = "push_deliveries"
@@ -66,10 +74,17 @@ class PushDelivery(db.Model):
     attempt_count = db.Column(db.Integer, nullable=False, default=0)
     last_error = db.Column(db.String(300))
     accepted_at = db.Column(db.DateTime)
+    ack_token_hash = db.Column(db.String(64))
+    ack_expires_at = db.Column(db.DateTime)
+    message_upto_id = db.Column(db.Integer)
+    acked_at = db.Column(db.DateTime)
+    acked_upto_id = db.Column(db.Integer)
+    applied_upto_id = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
     __table_args__ = (
+        db.Index("ix_push_delivery_acked", "user_id", "acked_at"),
         db.UniqueConstraint(
             "notification_id", "subscription_id", name="uq_push_delivery_pair"
         ),

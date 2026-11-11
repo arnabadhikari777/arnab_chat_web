@@ -65,12 +65,13 @@ def test_chat_list_does_not_write_when_nothing_is_waiting(app, duo):
     assert not [s for s in statements if "messages" in s.lower()]
 
 
-def test_chat_list_still_marks_waiting_messages_delivered(app, duo):
+def test_chat_list_no_longer_marks_waiting_messages_delivered(app, duo):
+    """Changed on purpose: opening the app is not proof that a device received anything."""
     send(duo.a, duo, "hi")
     assert Message.query.one().status == "sent"
     duo.b.get("/api/chats")
     db.session.expire_all()
-    assert Message.query.one().status == "delivered"
+    assert Message.query.one().status == "sent"
 
 
 def test_empty_acknowledgements_do_nothing(app, duo):

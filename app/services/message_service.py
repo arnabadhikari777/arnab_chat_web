@@ -211,19 +211,6 @@ def mark_delivered(user: User, conv: Conversation, ids=None) -> int:
     return n
 
 
-def mark_all_delivered(user: User) -> int:
-    """The recipient's app is open and asked for its chats, so waiting messages arrived."""
-    waiting = Message.query.filter(
-        Message.conversation_id.in_(_my_conversation_ids(user.id)),
-        Message.sender_id != user.id, Message.status == "sent",
-    )
-    if waiting.first() is None:        # the common case: a cheap read, no write, no commit
-        return 0
-    n = waiting.update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
-    db.session.commit()
-    return n
-
-
 def mark_seen(user: User, conv: Conversation, upto_id: int | None = None) -> int:
     now = utcnow()
     q = Message.query.filter(

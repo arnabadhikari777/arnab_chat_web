@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import abort, current_app, g, jsonify, request, session
 from flask_login import current_user
 
-from ...extensions import db, limiter
+from ...extensions import csrf, db, limiter
 from ...i18n import t
 from ...middleware.guards import auth_required
 from ...models import User
@@ -57,10 +57,21 @@ def _since(value):
         return None
 
 
+def _apply_receipts() -> None:
+    """Never lets a delivery-status problem break the page that called it."""
+    try:
+        from ...services import push_service
+        push_service.apply_pending_acks(current_user.id)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.exception("applying push receipts failed")
+
+
 # ------------------------------------------------------------------ lists & counters
 @bp.get("/api/summary")
 @auth_required
 def summary():
+    _apply_receipts()
     return jsonify({"messages": message_service.total_unread(current_user),
                     "notices": notification_service.unread_count(current_user.id)})
 
@@ -68,7 +79,10 @@ def summary():
 @bp.get("/api/chats")
 @auth_required
 def chats():
-    message_service.mark_all_delivered(current_user)   # the app is open, so they have arrived
+    # Opening the app does NOT mark anything Delivered. Only a verified push acknowledgement (or the open
+    # chat itself reporting the messages it displayed) does. Receipts that arrived while this person was
+    # offline are applied now, because they are online again.
+    _apply_receipts()
     items = message_service.chat_list(current_user)
     return jsonify({"chats": items, "total_unread": sum(c["unread"] for c in items)})
 
@@ -267,3 +281,35 @@ def notices_mark_displayed():
             continue
     n = notification_service.mark_displayed(current_user.id, clean)
     return jsonify({"ok": True, "marked": n, "notices": notification_service.unread_count(current_user.id)})
+
+
+@bp.post("/api/push/ack")
+@csrf.exempt                      # no session or CSRF token here: the single-use token in the body IS the proof
+@limiter.limit("120 per minute")
+def push_ack():
+    """The service worker confirms that THIS device received THIS push. Every failure gets the same answer."""
+    from ...services import push_service
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    ok = push_service.ack_delivery(data.get("id"), data.get("token"), data.get("endpoint"))
+    res = jsonify({"ok": True} if ok else {"ok": False})
+    res.headers["Cache-Control"] = "no-store"
+    return res, (200 if ok else 400)
+
+
+@bp.post("/api/notices/read-all")
+@auth_required
+@limiter.limit("60 per minute")
+def notices_read_all():
+    """Opening the Notice Box marks ALL of this user's unread notices read (one UPDATE)."""
+    n = notification_service.mark_all_read(current_user.id)
+    return jsonify({"ok": True, "marked": n, "notices": notification_service.unread_count(current_user.id)})
+
+
+@bp.post("/api/notices/clear-all")
+@auth_required
+@limiter.limit("10 per minute")
+def notices_clear_all():
+    """Permanently delete the signed-in user's own notifications. Takes no ids: nobody else's can be named."""
+    n = notification_service.clear_all(current_user.id)
+    return jsonify({"ok": True, "deleted": n, "notices": 0})

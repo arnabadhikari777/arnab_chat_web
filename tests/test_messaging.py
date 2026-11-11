@@ -150,11 +150,13 @@ def test_sender_fetching_never_makes_it_delivered(app, duo):
     assert Message.query.one().status == "sent"
 
 
-def test_delivered_when_receivers_app_asks_for_its_chats(app, duo):
+def test_asking_for_the_chat_list_does_not_make_it_delivered(app, duo):
+    """Changed on purpose: Delivered needs a verified push acknowledgement (tests/test_delivery_ack.py)
+    or the open chat reporting the messages it displayed (the explicit /delivered call below)."""
     send(duo.a, duo)
     duo.b.get("/api/chats")
     row = Message.query.one()
-    assert row.status == "delivered" and row.delivered_at is not None
+    assert row.status == "sent" and row.delivered_at is None
 
 
 def test_delivered_by_explicit_acknowledgement(app, duo):
