@@ -210,9 +210,9 @@
 
   /* ---------------------------------------------------------------- delivered / seen */
   async function acknowledge(incoming) {
-    if (visibleNow()) { markSeen(); return; }       // "seen" already means "delivered": one request, not two
-    const unsent = incoming.filter((m) => !m.mine && !m.deleted && m.status === "sent").map((m) => m.id);
-    if (unsent.length) await api(API + "/delivered", { method: "POST", json: { ids: unsent } });
+    // Opening the page no longer marks anything "delivered": only the phone's push receipt does (server side).
+    // Seeing the messages on screen is still "seen", which also counts as delivered.
+    if (visibleNow()) markSeen();
   }
   let seenBusy = false;
   async function markSeen() {

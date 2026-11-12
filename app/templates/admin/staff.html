@@ -1,0 +1,27 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import avatar, csrf with context %}
+{% block content %}
+<h2>{{ t('admin.nav.staff') }}</h2>
+<p class="muted">{{ t('admin.staff.intro') }}</p>
+<form method="post" class="stack" data-confirm="{{ t('admin.staff.confirm') }}">
+  {{ csrf() }}
+  <label class="field__label" for="username">{{ t('admin.staff.username') }}</label>
+  <input class="input" id="username" name="username" maxlength="32" autocapitalize="none" required>
+  <label class="field__label" for="level">{{ t('admin.staff.level') }}</label>
+  <select class="input" id="level" name="level">
+    <option value="moderator">{{ t('admin.level.moderator') }}</option>
+    <option value="admin">{{ t('admin.level.admin') }}</option>
+    <option value="none">{{ t('admin.level.none') }}</option>
+  </select>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('common.save') }}</button>
+</form>
+<div class="list list--flat">
+  {% for u in people %}
+    <a class="list-item" href="{{ url_for('admin.user', user_id=u.id) }}">
+      {{ avatar(u) }}
+      <span class="list-item__main"><span class="list-item__name">{{ u.full_name }}</span><span class="muted">@{{ u.username }}</span></span>
+      <span class="chip">{{ t('admin.level.' ~ u.staff_level) }}</span>
+    </a>
+  {% endfor %}
+</div>
+{% endblock %}

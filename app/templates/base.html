@@ -23,7 +23,8 @@
 <body{% if current_user.is_authenticated %} data-auth="1" data-poll-active="{{ config.POLL_INTERVAL_ACTIVE_MS }}" data-poll-idle="{{ config.POLL_INTERVAL_IDLE_MS }}" data-poll-chat-max="{{ config.POLL_INTERVAL_CHAT_MAX_MS }}" data-poll-list="{{ config.POLL_INTERVAL_LIST_MS }}"{% endif %}>
   {% include "partials/icons.html" %}
   <div class="app">
-    {% block app %}{% endblock %}
+    {% if site_banner %}<div class="site-banner" role="status">{{ site_banner }}</div>{% endif %}
+  {% block app %}{% endblock %}
   </div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>

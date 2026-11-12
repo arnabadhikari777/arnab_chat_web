@@ -66,9 +66,8 @@ def test_chat_list_does_not_write_when_nothing_is_waiting(app, duo):
 
 
 def test_chat_list_no_longer_marks_waiting_messages_delivered(app, duo):
-    """Changed on purpose: opening the app is not proof that a device received anything."""
+    """Old rule removed on purpose: asking for the chat list proves nothing about the phone."""
     send(duo.a, duo, "hi")
-    assert Message.query.one().status == "sent"
     duo.b.get("/api/chats")
     db.session.expire_all()
     assert Message.query.one().status == "sent"

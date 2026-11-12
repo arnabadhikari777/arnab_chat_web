@@ -90,7 +90,9 @@
     if (res.status === 401) return fail("session");
     if (res.status === 403) return fail("forbidden");        // usually an expired CSRF token: reload fixes it
     if (res.status === 429) return fail("rate_limited");
-    if (res.status === 503) return fail("server_not_configured");
+    if (res.status === 503) {
+      return fail(res.error && res.error.code === "server_disabled" ? "server_disabled" : "server_not_configured");
+    }
     if (res.status >= 500) return fail("server_error");
     return fail("save_failed");
   }
@@ -102,6 +104,7 @@
     if (i.permission === "denied") return { ...none, code: "denied", showHelp: true, showDisable: !!i.subscribed };
     if (i.config === null) return { ...none, code: "config_unavailable", showEnable: true, enableLabel: "push.retry" };
     if (!i.config.configured) return { ...none, code: "server_not_configured", showDisable: !!i.subscribed };
+    if (i.config.enabled === false) return { ...none, code: "server_disabled", showDisable: !!i.subscribed };
     if (i.swFailed) return { ...none, code: "sw_failed", showEnable: true, enableLabel: "push.retry" };
     if (i.subscribed) return { ...none, code: "on", showDisable: true };
     if (i.permission === "granted") return { ...none, code: "granted", showEnable: true };
@@ -116,6 +119,7 @@
     const cfg = knownConfig || await loadConfig();
     if (!cfg) return { ok: false, error: "network" };
     if (!cfg.configured || !cfg.publicKey) return { ok: false, error: "server_not_configured" };
+    if (cfg.enabled === false) return { ok: false, error: "server_disabled" };
 
     if (Notification.permission !== "granted") {
       let answer = "default";
@@ -204,7 +208,8 @@
     const hint = el("[data-push-hint]");
     if (hint) {
       const hintKey = { denied: "push.denied_help", ios_install: "push.ios_install_help", granted: "push.granted_help",
-                        sw_failed: "push.sw_failed_help", server_not_configured: "push.server_not_configured_help" }[state.code];
+                        sw_failed: "push.sw_failed_help", server_not_configured: "push.server_not_configured_help",
+                        server_disabled: "push.server_disabled_help" }[state.code];
       const text = [hintKey ? T(hintKey) : "", state.code === "granted" || state.code === "off" ? lastFailure : ""]
         .filter(Boolean).join(" ");
       hint.textContent = text;
@@ -226,7 +231,7 @@
 
   const ERROR_TEXT = {
     unsupported: "push.state.unsupported", denied: "push.state.denied", dismissed: "push.err.dismissed",
-    server_not_configured: "push.state.server_not_configured", sw_unavailable: "push.state.sw_failed",
+    server_not_configured: "push.state.server_not_configured", server_disabled: "push.state.server_disabled", sw_unavailable: "push.state.sw_failed",
     subscribe_failed: "push.err.subscribe_failed", save_failed: "push.err.save_failed",
     network: "toast.network_error", session: "push.err.session", forbidden: "push.err.forbidden",
     rate_limited: "push.err.rate_limited", server_error: "push.err.server_error",
@@ -247,7 +252,7 @@
         window.app.toast(T("push.enabled_toast"));
       } else if (res.error === "dismissed") {
         window.app.toast(T(ERROR_TEXT.dismissed));       // neutral, not an error
-      } else if (res.error !== "denied" && res.error !== "server_not_configured" && res.error !== "unsupported") {
+      } else if (res.error !== "denied" && res.error !== "server_not_configured" && res.error !== "server_disabled" && res.error !== "unsupported") {
         lastFailure = T(ERROR_TEXT[res.error] || "toast.something_wrong") + (res.status ? " [HTTP " + res.status + "]" : "");
         window.app.toast(lastFailure, "error");          // real failures only
       }
@@ -275,6 +280,8 @@
     }
   } catch (_) {}
   if (navigator.serviceWorker) {
+    // Re-send any delivery receipt the service worker could not send while the phone was offline.
+    navigator.serviceWorker.ready.then((reg) => { if (reg.active) reg.active.postMessage("flush-acks"); }).catch(() => {});
     navigator.serviceWorker.addEventListener("message", (e) => {
       if (e.data && e.data.type === "push-subscription-changed") {
         store("session", "goppo_push_synced", "");

@@ -11,20 +11,17 @@ the person saw the notification, and a device that is switched off gets it only 
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import logging
-import secrets
 from datetime import timedelta
 from functools import lru_cache
 from typing import Any
 
 from flask import current_app, url_for
-from sqlalchemy import func, or_
+from itsdangerous import BadData, URLSafeTimedSerializer
 
 from ..extensions import db
-from ..models import (Conversation, Message, Notification, PushDelivery, PushSubscription,
-                      User)
+from ..models import Conversation, Message, Notification, PushDelivery, PushSubscription, User
 from ..utils.time import utcnow
 from . import vapid
 
@@ -47,20 +44,20 @@ def vapid_status() -> vapid.VapidStatus:
                      cfg.get("VAPID_CONTACT") or "")
 
 
-def push_switched_on() -> bool:
-    """The admin's website-wide push switch (Admin Panel > Settings). On by default."""
-    from . import settings_service
-    return settings_service.enabled("push_enabled")
+def _push_switch_on() -> bool:
+    """Admin switch (Admin > Settings). Off = nothing is pushed; messages and the Notice Box still work."""
+    from . import site_settings
+    return site_settings.enabled("push_enabled")
 
 
 def vapid_configured() -> bool:
-    return vapid_status().configured and push_switched_on()
+    return vapid_status().configured
 
 
 def public_vapid_key() -> str | None:
     """The public key, only when the WHOLE push setup is valid. The private key never leaves the server."""
     st = vapid_status()
-    return st.public if st.configured and push_switched_on() else None
+    return st.public if st.configured else None
 
 
 # ------------------------------------------------------------------ subscriptions
@@ -141,13 +138,13 @@ def _wanted(user: User, note: Notification) -> bool:
     return True
 
 
-def _build_payload(note: Notification, user: User | None = None) -> dict[str, Any]:
+def _build_payload(note: Notification, user: User | None = None, sub: PushSubscription | None = None) -> dict[str, Any]:
     """What the service worker receives. Never contains private message text. Written in the RECIPIENT's language."""
     from . import notification_service as nsvc
 
     lang = getattr(user, "language", None)
     described = nsvc.describe(note, lang=lang)
-    return {
+    payload = {
         "title": current_app.config.get("APP_NAME", "Goppo"),
         "body": described.get("text") or "New notification",
         "url": note.link or url_for("notices.index"),
@@ -156,6 +153,60 @@ def _build_payload(note: Notification, user: User | None = None) -> dict[str, An
         "type": note.type,
         "renotify": True,
     }
+    token = _ack_token(note, user, sub)
+    if token:
+        payload["ack"] = token       # the phone's service worker sends this back: it is the proof of receipt
+    return payload
+
+
+# ------------------------------------------------------------------ device receipt (drives the double tick)
+_ACK_SALT = "goppo-push-ack-v1"
+
+
+def _ack_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=_ACK_SALT)
+
+
+def _ack_token(note: Notification, user: User | None, sub: PushSubscription | None) -> str | None:
+    """A signed receipt token for a new-message push: it names the person, the chat, the newest message that
+    this push announces, the notification and the device. Only the device that decrypted the push has it."""
+    if note.type != "new_message" or user is None:
+        return None
+    conv_id = (note.payload or {}).get("conversation_id")
+    if not isinstance(conv_id, int):
+        return None
+    newest = (db.session.query(db.func.max(Message.id))
+              .filter(Message.conversation_id == conv_id, Message.sender_id != user.id,
+                      Message.deleted_for_all.is_(False)).scalar())
+    if not newest:
+        return None
+    return _ack_serializer().dumps({"u": user.id, "c": conv_id, "m": int(newest), "n": note.id,
+                                    "s": sub.id if sub is not None else None})
+
+
+def acknowledge_receipt(token: str) -> int | None:
+    """The phone confirms it received a push. Marks that chat's waiting messages up to the announced id as
+    Delivered. Returns how many messages changed, or None if the token is invalid / expired / not usable.
+
+    Safe to call twice (idempotent). Cannot be forged (signed with SECRET_KEY) and can never touch another
+    person's chat (the token is bound to the recipient and re-checked against the conversation)."""
+    from . import message_service
+
+    try:
+        data = _ack_serializer().loads(token or "", max_age=int(current_app.config.get("PUSH_ACK_MAX_AGE_SECONDS", 90000)))
+        uid, conv_id, upto, nid, sid = int(data["u"]), int(data["c"]), int(data["m"]), int(data["n"]), data.get("s")
+    except (BadData, KeyError, TypeError, ValueError):
+        return None
+    user = db.session.get(User, uid)
+    conv = db.session.get(Conversation, conv_id)
+    if user is None or not user.is_active or conv is None or not conv.has_member(uid):
+        return None
+    if isinstance(sid, int):
+        PushDelivery.query.filter_by(notification_id=nid, subscription_id=sid, user_id=uid, acked_at=None).update(
+            {"acked_at": utcnow()}, synchronize_session=False)
+    changed = message_service.mark_delivered_upto(user, conv, upto)
+    db.session.commit()
+    return changed
 
 
 def _topic(group_key: str) -> str:
@@ -214,132 +265,13 @@ def _record(note: Notification, sub: PushSubscription, group_key: str, row: Push
             sub.status = "failed"      # the app re-activates it the next time this browser re-registers
 
 
-# ------------------------------------------------------------------ delivery acknowledgement
-# "accepted" (the push service took it) is NOT "delivered". A message turns Delivered only when the
-# recipient's service worker posts the single-use token that was inside that very push, AND the
-# recipient is online (presence) at that moment or later. See docs in PushDelivery.
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
-def _newest_message_id(note: Notification) -> int | None:
-    """Newest message this notice talks about. An ack can never cover messages sent after the push."""
-    if note.type != "new_message":
-        return None
-    cid = (note.payload or {}).get("conversation_id")
-    if not isinstance(cid, int):
-        return None
-    return (db.session.query(func.max(Message.id))
-            .filter(Message.conversation_id == cid, Message.sender_id != note.user_id).scalar())
-
-
-def _arm(row: PushDelivery, note: Notification) -> dict:
-    """Give THIS send its own random single-use token. Only its hash is stored. Returns the payload block."""
-    token = secrets.token_urlsafe(32)
-    cfg = current_app.config
-    ttl = int(cfg.get("PUSH_TTL_SECONDS", 86400)) + int(cfg.get("PUSH_ACK_EXTRA_SECONDS", 300))
-    row.ack_token_hash = _hash_token(token)
-    row.ack_expires_at = utcnow() + timedelta(seconds=ttl)
-    row.message_upto_id = _newest_message_id(note)
-    return {"id": row.id, "token": token}
-
-
-def _ack_failed(reason: str, delivery_id) -> bool:
-    db.session.rollback()
-    # Never log the token. Callers always give the same generic answer, so nothing leaks about which check failed.
-    log.warning("push ack rejected (%s) for delivery %s", reason, delivery_id)
-    return False
-
-
-def _apply(row: PushDelivery, note: Notification) -> int:
-    """Turn an acknowledged push into Delivered messages (caller commits). Idempotent and forward-only."""
-    upto = row.acked_upto_id or 0
-    if not upto or upto <= (row.applied_upto_id or 0):
-        return 0
-    row.applied_upto_id = upto
-    cid = (note.payload or {}).get("conversation_id")
-    conv = db.session.get(Conversation, cid) if isinstance(cid, int) else None
-    if note.type != "new_message" or conv is None or not conv.has_member(row.user_id):
-        return 0
-    return (Message.query.filter(
-        Message.conversation_id == conv.id, Message.sender_id != row.user_id,
-        Message.status == "sent", Message.id <= upto,
-    ).update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False))
-
-
-def ack_delivery(delivery_id, token, endpoint) -> bool:
-    """Verify a service-worker acknowledgement. True only for a valid, first-time, unexpired one.
-
-    Checks: the delivery exists, the token matches (constant time) and is unused and unexpired, the device
-    endpoint is exactly the subscription this push was sent to (still active, same owner), the notice and the
-    account still exist. The token is consumed with one conditional UPDATE, so two simultaneous copies of the
-    same acknowledgement cannot both win.
-    """
-    if (not isinstance(delivery_id, int) or isinstance(delivery_id, bool) or delivery_id <= 0
-            or not isinstance(token, str) or not 20 <= len(token) <= 100
-            or not isinstance(endpoint, str) or not endpoint or len(endpoint) > MAX_ENDPOINT_LEN):
-        return _ack_failed("malformed", delivery_id if isinstance(delivery_id, int) else None)
-    row = db.session.get(PushDelivery, delivery_id)
-    stored = row.ack_token_hash if row is not None else None
-    given = _hash_token(token)
-    if not stored or not hmac.compare_digest(stored.encode(), given.encode()):
-        return _ack_failed("bad_or_used_token", delivery_id)
-    now = utcnow()
-    if row.ack_expires_at is None or row.ack_expires_at < now:
-        return _ack_failed("token_expired", delivery_id)
-    sub = db.session.get(PushSubscription, row.subscription_id)
-    if (sub is None or sub.status != "active" or sub.user_id != row.user_id
-            or not hmac.compare_digest(sub.endpoint.encode(), endpoint.encode())):
-        return _ack_failed("subscription_mismatch", delivery_id)
-    note = db.session.get(Notification, row.notification_id)
-    user = db.session.get(User, row.user_id)
-    if note is None or user is None or note.user_id != row.user_id or not user.is_active:
-        return _ack_failed("notice_or_user_gone", delivery_id)
-
-    covers = max(row.acked_upto_id or 0, row.message_upto_id or 0) or None
-    won = (PushDelivery.query.filter(PushDelivery.id == row.id, PushDelivery.ack_token_hash == stored)
-           .update({"ack_token_hash": None, "acked_at": now, "acked_upto_id": covers,
-                    "status": "accepted", "accepted_at": row.accepted_at or now, "last_error": None},
-                   synchronize_session=False))
-    if won != 1:
-        return _ack_failed("lost_race", delivery_id)
-    sub.last_success_at, sub.failure_count = now, 0
-    db.session.flush()
-    db.session.refresh(row)
-    from . import presence_service
-    if presence_service.is_online(user):
-        _apply(row, note)
-    # Offline right now: the receipt stays recorded and is applied by apply_pending_acks() the moment
-    # this person is online again. Nothing is marked Delivered while they are offline.
-    db.session.commit()
-    return True
-
-
-def apply_pending_acks(user_id: int, limit: int = 20) -> int:
-    """Called while this person is making authenticated requests (so they are online): apply receipts that
-    arrived while they were offline. One indexed query; no write unless there is something to apply."""
-    rows = (PushDelivery.query.filter(
-        PushDelivery.user_id == user_id, PushDelivery.acked_at.isnot(None),
-        or_(PushDelivery.applied_upto_id.is_(None), PushDelivery.applied_upto_id < PushDelivery.acked_upto_id),
-    ).order_by(PushDelivery.id.asc()).limit(limit).all())
-    if not rows:
-        return 0
-    total = 0
-    for row in rows:
-        note = db.session.get(Notification, row.notification_id)
-        if note is not None:
-            total += _apply(row, note)
-    db.session.commit()
-    return total
-
-
 def enqueue_and_send(note: Notification, force: bool = False) -> int:
     """Send this notification to the person's devices. Returns how many devices accepted it.
 
     force=True means "this notice just got NEW activity" (another message in the same chat), so a
     delivery that was accepted earlier must be sent again with the new count.
     """
-    if not vapid_configured():
+    if not vapid_configured() or not _push_switch_on():
         return 0
     user = db.session.get(User, note.user_id)
     if user is None or not _wanted(user, note):
@@ -348,21 +280,13 @@ def enqueue_and_send(note: Notification, force: bool = False) -> int:
     if not subs:
         return 0
     group_key = note.dedupe_key or f"n:{note.id}"
-    base = _build_payload(note, user)
     rows = {d.subscription_id: d for d in PushDelivery.query.filter_by(notification_id=note.id).all()}
     accepted = 0
     for sub in subs:
         row = rows.get(sub.id)
         if row is not None and row.status == "accepted" and not force:
             continue
-        if row is None:               # one row per notice+device (unique pair), created BEFORE sending so it has an id
-            row = PushDelivery(notification_id=note.id, subscription_id=sub.id, user_id=note.user_id,
-                               group_key=group_key, status="pending", attempt_count=0)
-            db.session.add(row)
-            db.session.flush()
-            rows[sub.id] = row
-        payload = {**base, "ack": _arm(row, note)}      # every send gets its own fresh single-use token
-        result, err = _send_one(sub, payload, group_key)
+        result, err = _send_one(sub, _build_payload(note, user, sub), group_key)
         _record(note, sub, group_key, row, result, err, restart=force)
         accepted += result == "accepted"
     db.session.commit()
@@ -374,8 +298,9 @@ def sync_pending_for_user(user_id: int, limit: int = 10) -> dict:
     at most MAX_ATTEMPTS tries each, only while the push is still young (PUSH_TTL_SECONDS), only `limit` per call.
     It never creates pushes for notices that were not attempted before, so opening the app cannot cause a flood.
     """
-    if not vapid_configured():                       # keys missing OR the admin switched push off
-        return {"attempted": 0, "accepted": 0, "configured": False}
+    st = vapid_status()
+    if not st.configured or not _push_switch_on():
+        return {"attempted": 0, "accepted": 0, "configured": st.configured}
     subs = {s.id: s for s in list_active_subscriptions(user_id)}
     user = db.session.get(User, user_id)
     if not subs or user is None:
@@ -392,7 +317,7 @@ def sync_pending_for_user(user_id: int, limit: int = 10) -> dict:
             row.attempt_count = MAX_ATTEMPTS         # nothing to alert about any more: stop for good
             continue
         sub = subs[row.subscription_id]
-        result, err = _send_one(sub, {**_build_payload(note, user), "ack": _arm(row, note)}, row.group_key)
+        result, err = _send_one(sub, _build_payload(note, user, sub), row.group_key)
         _record(note, sub, row.group_key, row, result, err)
         attempted += 1
         accepted += result == "accepted"

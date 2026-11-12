@@ -5,7 +5,7 @@ from flask_login import current_user
 from ...extensions import db, limiter
 from ...i18n import get_language
 from ...middleware.guards import auth_required
-from ...services import auth_service, otp_service, profile_service
+from ...services import auth_service, otp_service, profile_service, site_settings
 from ...services.errors import EmailDeliveryError, FieldErrors, OtpCooldown, OtpError
 from . import bp
 
@@ -35,6 +35,9 @@ def privacy():
 @auth_required
 @limiter.limit("30 per hour", methods=["POST"])
 def edit_profile():
+    if not site_settings.enabled("profile_edit_enabled"):
+        flash("site.profile_edit_off", "error")
+        return redirect(url_for("settings.index"))
     errors = {}
     if request.method == "POST":
         try:

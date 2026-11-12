@@ -28,13 +28,18 @@ class User(UserMixin, db.Model):
     is_public = db.Column(db.Boolean, nullable=False, default=True)
     is_email_verified = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String(20), nullable=False, default="active")  # active|suspended|banned
-    status_until = db.Column(db.DateTime)   # a timed suspension/ban ends here (NULL = until an admin changes it)
-    role = db.Column(db.String(20), nullable=False, default="user")  # user|admin
+    role = db.Column(db.String(20), nullable=False, default="user")  # user|admin (admin = any staff member)
+    # Staff level, only meaningful when role == "admin": super_admin|admin|moderator (see services/permissions.py)
+    admin_role = db.Column(db.String(20))
     language = db.Column(db.String(5), nullable=False, default="en")
     # Notification settings. Important account/security notices are always sent.
     notify_messages = db.Column(db.Boolean, nullable=False, default=True)
     notify_announcements = db.Column(db.Boolean, nullable=False, default=True)
     last_seen_at = db.Column(db.DateTime)
+    # A suspension can end by itself. None = until an admin lifts it.
+    suspended_until = db.Column(db.DateTime)
+    # Admin "sign out everywhere" raises this; it is part of the session id, so older sessions stop working.
+    session_epoch = db.Column(db.Integer, nullable=False, default=0, server_default="0")
 
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -71,18 +76,37 @@ class User(UserMixin, db.Model):
     def session_fingerprint(self) -> str:
         """Changes whenever the password changes, which signs out every older session."""
         key = (current_app.config.get("SECRET_KEY") or "").encode()
-        return hmac.new(key, (self.password_hash or "").encode(), sha256).hexdigest()[:16]
+        data = (self.password_hash or "") + (f":{self.session_epoch}" if self.session_epoch else "")
+        return hmac.new(key, data.encode(), sha256).hexdigest()[:16]
 
     def get_id(self) -> str:  # Flask-Login stores this in the session cookie
         return f"{self.id}.{self.session_fingerprint()}"
 
     @property
     def is_active(self) -> bool:  # Flask-Login: inactive users cannot log in
-        return self.status == "active"
+        if self.status == "active":
+            return True
+        # a timed suspension that has run out no longer blocks the account
+        return (self.status == "suspended" and self.suspended_until is not None
+                and self.suspended_until <= utcnow())
+
+    def lift_expired_suspension(self) -> bool:
+        """Write the end of a finished timed suspension. The caller commits. True if something changed."""
+        if self.status == "suspended" and self.suspended_until is not None and self.suspended_until <= utcnow():
+            self.status, self.suspended_until = "active", None
+            return True
+        return False
 
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"
+
+    @property
+    def staff_level(self) -> str | None:
+        """None for normal users. An older admin row without a level was a full admin before levels existed."""
+        if self.role != "admin":
+            return None
+        return self.admin_role if self.admin_role in ("moderator", "admin", "super_admin") else "super_admin"
 
     def __repr__(self) -> str:
         return f"<User {self.username}>"

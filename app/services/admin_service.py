@@ -5,9 +5,10 @@ from flask import current_app, url_for
 from sqlalchemy import func, or_
 
 from ..extensions import db
-from ..models import (AdminAuditLog, Announcement, Conversation, Message, MessageRequest, PushDelivery, PushSubscription,
-                      Notification, Report, User)
+from ..models import (AdminAuditLog, Announcement, Conversation, Message, MessageRequest, ModerationNote,
+                      Notification, PushDelivery, PushSubscription, Report, User)
 from ..utils.time import utcnow
+from . import permissions
 from .errors import FieldErrors, ServiceError
 from .notification_service import add_notification
 from .presence_service import is_online
@@ -24,7 +25,22 @@ def audit(admin: User, action: str, target_type: str | None = None, target_id: i
 
 
 # ------------------------------------------------------------------ statistics
+def expire_suspensions() -> int:
+    """Turn finished timed suspensions back into active accounts (so lists and counts are right)."""
+    n = (User.query.filter(User.status == "suspended", User.suspended_until.isnot(None),
+                           User.suspended_until <= utcnow())
+         .update({"status": "active", "suspended_until": None}, synchronize_session=False))
+    if n:
+        db.session.commit()
+    return n
+
+
+def recent_events(limit: int = 8):
+    return AdminAuditLog.query.order_by(AdminAuditLog.id.desc()).limit(limit).all()
+
+
 def stats() -> dict:
+    expire_suspensions()
     now = utcnow()
     day, week = now - timedelta(days=1), now - timedelta(days=7)
     users = User.query
@@ -45,12 +61,21 @@ def stats() -> dict:
         "requests_pending": MessageRequest.query.filter_by(status="pending").count(),
         "reports_open": Report.query.filter(Report.status.in_(("open", "reviewing"))).count(),
         "announcements_active": Announcement.query.filter_by(is_active=True).count(),
+        "notices_unread": Notification.query.filter_by(is_read=False).count(),
+        "push_devices": PushSubscription.query.filter_by(status="active").count(),
+        "push_devices_bad": PushSubscription.query.filter(PushSubscription.status != "active").count(),
+        "push_receipts_day": PushDelivery.query.filter(PushDelivery.acked_at > day).count(),
+        "push_problems_day": PushDelivery.query.filter(PushDelivery.updated_at > day,
+                                                       PushDelivery.status.notin_(("pending", "accepted"))).count(),
     }
 
 
 # ------------------------------------------------------------------ users
-def list_users(q: str | None, status: str | None, page: int):
+def list_users(q: str | None, status: str | None, page: int, privacy: str | None = None):
+    expire_suspensions()
     query = User.query
+    if privacy in ("public", "private"):
+        query = query.filter(User.is_public.is_(privacy == "public"))
     term = (q or "").strip().lower().lstrip("@")[:60]
     if term:
         esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -76,86 +101,46 @@ def user_detail(user: User) -> dict:
     }
 
 
-def set_status(admin: User, target: User, status: str, days: int | None = None) -> None:
-    """active / suspended / banned. `days` makes a suspension or ban end by itself (1-3650); empty = until changed."""
+MAX_SUSPEND_DAYS = 365
+
+
+def _days(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        days = int(value)
+    except (TypeError, ValueError):
+        raise ServiceError("admin.bad_days")
+    if not 1 <= days <= MAX_SUSPEND_DAYS:
+        raise ServiceError("admin.bad_days")
+    return days
+
+
+def set_status(admin: User, target: User, status: str, days=None) -> None:
+    """days only matters for "suspended": the suspension then ends by itself after that many days."""
     if status not in STATUSES:
         raise ServiceError("admin.bad_status")
+    days = _days(days) if status == "suspended" else None
     if target.id == admin.id:
         raise ServiceError("admin.not_self")
     if target.is_admin:
         raise ServiceError("admin.not_admin")
-    if days is not None and not 1 <= days <= 3650:
-        raise ServiceError("admin.bad_days")
-    until = utcnow() + timedelta(days=days) if (days and status != "active") else None
-    if target.status == status and target.status_until == until:
+    if (status == "banned" or target.status == "banned") and not permissions.has(admin, "users.ban"):
+        raise ServiceError("admin.no_permission")          # moderators cannot ban or unban
+    until = utcnow() + timedelta(days=days) if days else None
+    if target.status == status and (status != "suspended" or target.suspended_until == until):
         return
     old = target.status
     target.status = status
-    target.status_until = until
-    audit(admin, "user.status", "user", target.id,
-          {"from": old, "to": status, "until": until.isoformat() if until else None})
+    target.suspended_until = until
+    audit(admin, "user.status", "user", target.id, {"from": old, "to": status, "days": days})
     if status == "active":
         add_notification(target.id, "account_restored", {}, None, f"restored:{target.id}:{utcnow().timestamp()}")
     db.session.commit()
 
 
-def release_if_expired(user: User) -> bool:
-    """A timed suspension/ban that has run out turns the account active again (checked at sign-in and on each request)."""
-    if user.status != "active" and user.status_until is not None and user.status_until <= utcnow():
-        user.status, user.status_until = "active", None
-        db.session.add(AdminAuditLog(admin_id=None, action="user.status_expired", target_type="user",
-                                     target_id=user.id, details={"to": "active"}))
-        db.session.commit()
-        return True
-    return False
-
-
-def user_devices(user: User) -> list:
-    return (PushSubscription.query.filter_by(user_id=user.id)
-            .order_by(PushSubscription.id.desc()).limit(20).all())
-
-
-def revoke_push(admin: User, target: User, sub_id: int) -> None:
-    """Remove one registered device of THIS user (the device must belong to the user in the URL)."""
-    sub = db.session.get(PushSubscription, sub_id)
-    if sub is None or sub.user_id != target.id:
-        raise ServiceError("admin.not_found")
-    db.session.delete(sub)                         # its delivery records go with it (ON DELETE CASCADE)
-    audit(admin, "push.revoke", "user", target.id, {"subscription_id": sub_id})
-    db.session.commit()
-
-
-# ------------------------------------------------------------------ push & notification numbers (global counts only)
-_PS_CACHE: dict = {"at": None, "v": None}
-
-
-def push_stats() -> dict:
-    """Totals for the dashboard. Kept for 60 seconds so opening the dashboard repeatedly costs nothing.
-    Only whole-site counts, never anything about one person, so sharing the cache is safe."""
-    now = utcnow()
-    if (not current_app.testing and _PS_CACHE["v"] is not None
-            and (now - _PS_CACHE["at"]).total_seconds() < 60):
-        return _PS_CACHE["v"]
-    hour_ago = now - timedelta(hours=1)
-    v = {
-        "notices_total": Notification.query.count(),
-        "notices_unread": Notification.query.filter(Notification.is_read.is_(False)).count(),
-        "push_active": PushSubscription.query.filter_by(status="active").count(),
-        "push_accepted": PushDelivery.query.filter_by(status="accepted").count(),
-        "push_acked": PushDelivery.query.filter(PushDelivery.acked_at.isnot(None)).count(),
-        "push_failed": PushDelivery.query.filter(PushDelivery.status.in_(("failed", "expired"))).count(),
-        "push_unacked": PushDelivery.query.filter(PushDelivery.status == "accepted", PushDelivery.acked_at.is_(None),
-                                                  PushDelivery.updated_at < hour_ago).count(),
-    }
-    _PS_CACHE.update(at=now, v=v)
-    return v
-
-
 # ------------------------------------------------------------------ announcements
 def create_announcement(admin: User, form) -> Announcement:
-    from . import settings_service
-    if not settings_service.enabled("announcements_enabled"):
-        raise ServiceError("site.announcements_closed")
     title = (form.get("title") or "").strip()
     body = (form.get("body") or "").strip()
     title_bn = (form.get("title_bn") or "").strip() or None
@@ -215,49 +200,6 @@ def toggle_announcement(admin: User, announcement_id: int) -> Announcement:
     return ann
 
 
-def _ann_fields(form) -> dict:
-    data = {"title": (form.get("title") or "").strip(), "body": (form.get("body") or "").strip(),
-            "title_bn": (form.get("title_bn") or "").strip() or None,
-            "body_bn": (form.get("body_bn") or "").strip() or None}
-    errors = {}
-    if not 3 <= len(data["title"]) <= 150:
-        errors["title"] = ("err.ann_title", {})
-    if not 3 <= len(data["body"]) <= 3000:
-        errors["body"] = ("err.ann_body", {})
-    if data["title_bn"] and len(data["title_bn"]) > 150:
-        errors["title_bn"] = ("err.ann_title", {})
-    if data["body_bn"] and len(data["body_bn"]) > 3000:
-        errors["body_bn"] = ("err.ann_body", {})
-    if errors:
-        raise FieldErrors(errors)
-    return data
-
-
-def update_announcement(admin: User, announcement_id: int, form) -> Announcement:
-    """Fixes the text people see when they open it. It does not send anything again."""
-    ann = db.session.get(Announcement, announcement_id)
-    if ann is None:
-        raise ServiceError("admin.not_found")
-    for key, value in _ann_fields(form).items():
-        setattr(ann, key, value)
-    audit(admin, "announcement.update", "announcement", ann.id)
-    db.session.commit()
-    return ann
-
-
-def delete_announcement(admin: User, announcement_id: int) -> None:
-    """Removes the announcement and every user's notice that points to it."""
-    ann = db.session.get(Announcement, announcement_id)
-    if ann is None:
-        raise ServiceError("admin.not_found")
-    removed = (Notification.query.filter(Notification.type == "announcement",
-                                         Notification.dedupe_key == f"announcement:{ann.id}")
-               .delete(synchronize_session=False))
-    db.session.delete(ann)
-    audit(admin, "announcement.delete", "announcement", announcement_id, {"notices_removed": removed})
-    db.session.commit()
-
-
 # ------------------------------------------------------------------ reports
 def list_reports(status: str | None, page: int):
     q = Report.query
@@ -291,3 +233,111 @@ def list_audit(page: int):
     rows = (AdminAuditLog.query.order_by(AdminAuditLog.id.desc())
             .offset((page - 1) * PAGE).limit(PAGE + 1).all())
     return rows[:PAGE], len(rows) > PAGE
+
+
+# ------------------------------------------------------------------ moderation notes, history, sessions
+def add_note(admin: User, target: User, text: str) -> ModerationNote:
+    text = (text or "").strip()
+    if not 2 <= len(text) <= 500:
+        raise ServiceError("admin.bad_note")
+    note = ModerationNote(user_id=target.id, admin_id=admin.id, note=text)
+    db.session.add(note)
+    audit(admin, "user.note", "user", target.id, {})       # the note text stays out of the log
+    db.session.commit()
+    return note
+
+
+def notes_for(target: User, limit: int = 30):
+    return ModerationNote.query.filter_by(user_id=target.id).order_by(ModerationNote.id.desc()).limit(limit).all()
+
+
+def history_for(target: User, limit: int = 20):
+    return (AdminAuditLog.query.filter_by(target_type="user", target_id=target.id)
+            .order_by(AdminAuditLog.id.desc()).limit(limit).all())
+
+
+def force_logout(admin: User, target: User) -> None:
+    """Sign the person out on every device. They can sign in again with their password."""
+    if target.id == admin.id:
+        raise ServiceError("admin.not_self")
+    if target.is_admin:
+        raise ServiceError("admin.not_admin")
+    target.session_epoch = (target.session_epoch or 0) + 1
+    audit(admin, "user.force_logout", "user", target.id, {})
+    db.session.commit()
+
+
+# ------------------------------------------------------------------ announcements: edit / delete
+def _announcement_fields(form) -> dict:
+    title = (form.get("title") or "").strip()
+    body = (form.get("body") or "").strip()
+    title_bn = (form.get("title_bn") or "").strip() or None
+    body_bn = (form.get("body_bn") or "").strip() or None
+    errors = {}
+    if not 3 <= len(title) <= 150:
+        errors["title"] = ("err.ann_title", {})
+    if not 3 <= len(body) <= 3000:
+        errors["body"] = ("err.ann_body", {})
+    if title_bn and len(title_bn) > 150:
+        errors["title_bn"] = ("err.ann_title", {})
+    if body_bn and len(body_bn) > 3000:
+        errors["body_bn"] = ("err.ann_body", {})
+    if errors:
+        raise FieldErrors(errors)
+    return {"title": title, "body": body, "title_bn": title_bn, "body_bn": body_bn}
+
+
+def update_announcement(admin: User, announcement_id: int, form) -> Announcement:
+    ann = db.session.get(Announcement, announcement_id)
+    if ann is None:
+        raise ServiceError("admin.not_found")
+    for key, value in _announcement_fields(form).items():
+        setattr(ann, key, value)
+    audit(admin, "announcement.edit", "announcement", ann.id, {})
+    db.session.commit()
+    return ann
+
+
+def delete_announcement(admin: User, announcement_id: int) -> None:
+    """Removes the announcement AND the notices already sent to people's Notice Box."""
+    ann = db.session.get(Announcement, announcement_id)
+    if ann is None:
+        raise ServiceError("admin.not_found")
+    removed = (Notification.query.filter_by(type="announcement", dedupe_key=f"announcement:{ann.id}")
+               .delete(synchronize_session=False))
+    db.session.delete(ann)
+    audit(admin, "announcement.delete", "announcement", announcement_id, {"notices_removed": removed})
+    db.session.commit()
+
+
+# ------------------------------------------------------------------ staff levels (super admin only)
+def list_staff():
+    return User.query.filter(User.role == "admin").order_by(User.id).all()
+
+
+def set_staff_level(admin: User, username: str, level: str) -> User:
+    """Give someone the admin or moderator level, or take it away (level "none").
+
+    Only super admins reach this (route permission, re-checked here). The env-listed super admins and
+    yourself cannot be changed, so the website can never be left without an admin."""
+    if not permissions.has(admin, "staff.manage"):
+        raise ServiceError("admin.no_permission")
+    if level not in ("admin", "moderator", "none"):
+        raise ServiceError("admin.bad_level")
+    target = User.query.filter_by(username=(username or "").strip().lower().lstrip("@")).first()
+    if target is None:
+        raise ServiceError("admin.not_found")
+    if target.id == admin.id:
+        raise ServiceError("admin.not_self")
+    if target.email in current_app.config["ADMIN_EMAILS"]:
+        raise ServiceError("admin.staff_env")
+    if level != "none" and not (target.is_email_verified and target.status == "active"):
+        raise ServiceError("admin.staff_target")
+    old = target.staff_level
+    if level == "none":
+        target.role, target.admin_role = "user", None
+    else:
+        target.role, target.admin_role = "admin", level
+    audit(admin, "staff.level", "user", target.id, {"from": old, "to": None if level == "none" else level})
+    db.session.commit()
+    return target

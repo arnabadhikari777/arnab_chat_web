@@ -33,6 +33,19 @@ def send(browser, duo, text="hello", uuid="uuid-0001-aaaa"):
     return browser.post(f"{duo.url}/messages", json={"uuid": uuid, "body": text})
 
 
+def push_receipt(duo, user=None, upto=None, conv=None, **over):
+    """The signed receipt token exactly as push_service puts it into a push (see _ack_token)."""
+    from app.services import push_service
+    user = user or duo.bob
+    newest = upto or db.session.query(db.func.max(Message.id)).scalar()
+    data = {"u": user.id, "c": conv or duo.conv, "m": newest, "n": 1, "s": None, **over}
+    return push_service._ack_serializer().dumps(data)
+
+
+def deliver_by_push(browser, duo, **kw):
+    return browser.post("/api/push/ack", json={"token": push_receipt(duo, **kw)})
+
+
 def file_post(browser, duo, data, name, uuid="file-0001-aaaa", **extra):
     form = {"uuid": uuid, "file": (io.BytesIO(data), name), **extra}
     return browser.post(f"{duo.url}/messages", data=form, content_type="multipart/form-data")
@@ -150,20 +163,101 @@ def test_sender_fetching_never_makes_it_delivered(app, duo):
     assert Message.query.one().status == "sent"
 
 
-def test_asking_for_the_chat_list_does_not_make_it_delivered(app, duo):
-    """Changed on purpose: Delivered needs a verified push acknowledgement (tests/test_delivery_ack.py)
-    or the open chat reporting the messages it displayed (the explicit /delivered call below)."""
+def test_receiver_opening_the_app_or_chat_list_does_not_make_it_delivered(app, duo):
     send(duo.a, duo)
-    duo.b.get("/api/chats")
+    duo.b.get("/api/chats"); duo.b.get(f"{duo.url}/poll"); duo.b.get(f"{duo.url}/messages")
     row = Message.query.one()
-    assert row.status == "sent" and row.delivered_at is None
+    assert (row.status, row.delivered_at) == ("sent", None)
 
 
-def test_delivered_by_explicit_acknowledgement(app, duo):
+def test_delivered_when_the_phone_confirms_the_push(app, duo):
+    send(duo.a, duo)
+    res = deliver_by_push(duo.b, duo)
+    assert res.status_code == 200 and res.get_json() == {"ok": True, "updated": 1}
+    row = Message.query.one()
+    assert row.status == "delivered" and row.delivered_at is not None
+
+
+def test_the_old_delivered_endpoint_cannot_be_used_to_claim_delivery(app, duo):
     send(duo.a, duo)
     mid = Message.query.one().id
-    assert duo.b.post(f"{duo.url}/delivered", json={"ids": [mid]}).get_json()["updated"] == 1
-    assert Message.query.one().status == "delivered"
+    assert duo.b.post(f"{duo.url}/delivered", json={"ids": [mid]}).get_json()["updated"] == 0
+    assert Message.query.one().status == "sent"
+
+
+def test_receipt_needs_no_login_but_needs_a_valid_signature(app, duo):
+    send(duo.a, duo)
+    anonymous = app.test_client()
+    assert anonymous.post("/api/push/ack", json={"token": push_receipt(duo)}).status_code == 200
+    for bad in ["", "garbage", push_receipt(duo)[:-3] + "xyz", None, 123]:
+        assert anonymous.post("/api/push/ack", json={"token": bad}).status_code == 400
+    assert anonymous.post("/api/push/ack", data="x").status_code == 400
+
+
+def test_receipt_signed_with_another_key_is_rejected(app, duo):
+    from itsdangerous import URLSafeTimedSerializer
+    send(duo.a, duo)
+    forged = URLSafeTimedSerializer("not-the-secret", salt="goppo-push-ack-v1").dumps(
+        {"u": duo.bob.id, "c": duo.conv, "m": 999, "n": 1, "s": None})
+    assert duo.b.post("/api/push/ack", json={"token": forged}).status_code == 400
+    assert Message.query.one().status == "sent"
+
+
+def test_expired_receipt_is_rejected(app, duo):
+    send(duo.a, duo)
+    token = push_receipt(duo)
+    app.config["PUSH_ACK_MAX_AGE_SECONDS"] = -1
+    assert duo.b.post("/api/push/ack", json={"token": token}).status_code == 400
+    assert Message.query.one().status == "sent"
+
+
+def test_receipt_only_covers_messages_the_push_announced(app, duo):
+    send(duo.a, duo, "1", "uuid-0001-aaaa")
+    announced = Message.query.one().id
+    send(duo.a, duo, "2", "uuid-0002-aaaa")          # arrived after that push was built
+    deliver_by_push(duo.b, duo, upto=announced)
+    assert [m.status for m in Message.query.order_by(Message.id)] == ["delivered", "sent"]
+
+
+def test_one_receipt_delivers_the_whole_grouped_batch(app, duo):
+    for i in range(12):
+        send(duo.a, duo, f"m{i}", f"uuid-{i:04d}-bbbb")
+    assert deliver_by_push(duo.b, duo).get_json()["updated"] == 12
+    assert {m.status for m in Message.query.all()} == {"delivered"}
+
+
+def test_receipt_is_idempotent(app, duo):
+    send(duo.a, duo)
+    token = push_receipt(duo)
+    assert duo.b.post("/api/push/ack", json={"token": token}).get_json()["updated"] == 1
+    first = Message.query.one().delivered_at
+    assert duo.b.post("/api/push/ack", json={"token": token}).get_json()["updated"] == 0
+    assert Message.query.one().delivered_at == first
+
+
+def test_receipt_cannot_deliver_in_a_chat_the_person_is_not_in(app, duo):
+    send(duo.a, duo)
+    outsider = deliver_by_push(duo.c, duo, user=duo.cara)       # a validly signed token, but Cara is not a member
+    assert outsider.status_code == 400
+    assert Message.query.one().status == "sent"
+
+
+def test_receipt_never_changes_the_senders_own_messages_or_moves_seen_back(app, duo):
+    send(duo.a, duo, "from alice", "uuid-0001-aaaa")
+    duo.b.post(f"{duo.url}/messages", json={"uuid": "uuid-0002-bbbb", "body": "from bob"})
+    duo.b.post(f"{duo.url}/seen", json={})                       # alice's message is now seen
+    deliver_by_push(duo.b, duo)
+    rows = {m.body: m.status for m in Message.query.all()}
+    assert rows == {"from alice": "seen", "from bob": "sent"}
+
+
+def test_receipt_for_a_suspended_account_is_ignored(app, duo):
+    send(duo.a, duo)
+    token = push_receipt(duo)
+    duo.bob.status = "suspended"
+    db.session.commit()
+    assert duo.b.post("/api/push/ack", json={"token": token}).status_code == 400
+    assert Message.query.one().status == "sent"
 
 
 def test_sender_cannot_mark_own_messages_delivered_or_seen(app, duo):
@@ -186,8 +280,7 @@ def test_status_never_goes_backwards(app, duo):
     send(duo.a, duo)
     mid = Message.query.one().id
     duo.b.post(f"{duo.url}/seen", json={})
-    duo.b.get("/api/chats")
-    duo.b.post(f"{duo.url}/delivered", json={"ids": [mid]})
+    deliver_by_push(duo.b, duo)
     assert Message.query.one().status == "seen"
 
 
@@ -203,7 +296,7 @@ def test_sender_sees_status_changes_through_polling(app, duo):
     mid = Message.query.one().id
     first = duo.a.get(f"{duo.url}/messages").get_json()
     since = first["server_time"]
-    duo.b.post(f"{duo.url}/delivered", json={"ids": [mid]})
+    deliver_by_push(duo.b, duo)
     poll = duo.a.get(f"{duo.url}/poll", query_string={"after": mid, "since": since}).get_json()
     assert {"id": mid, "status": "delivered", "deleted": False} in poll["updates"]
     since = poll["server_time"]

@@ -101,8 +101,21 @@ def _notify_recipient(other: User, user: User, conv: Conversation):
 
 
 # ------------------------------------------------------------------ sending
+def _check_site_allows(voice: bool, media: bool) -> None:
+    """Admin switches (Admin > Settings). Sending is refused with a clear message; nothing is stored."""
+    from . import site_settings
+
+    if not site_settings.enabled("messaging_enabled"):
+        raise ServiceError("site.messaging_off")
+    if media and voice and not site_settings.enabled("voice_enabled"):
+        raise ServiceError("site.voice_off")
+    if media and not voice and not site_settings.enabled("uploads_enabled"):
+        raise ServiceError("site.uploads_off")
+
+
 def send_text(user: User, conv: Conversation, client_uuid: str, body: str):
     """Returns (message, created). A repeated client_uuid returns the first message again."""
+    _check_site_allows(voice=False, media=False)
     _check_uuid(client_uuid)
     body = (body or "").strip()
     if not body:
@@ -126,6 +139,7 @@ def send_text(user: User, conv: Conversation, client_uuid: str, body: str):
 def send_media(user: User, conv: Conversation, client_uuid: str, file, voice: bool = False,
                caption: str = "", duration=None):
     """Validate, upload to Cloudinary, then save. Retrying never uploads twice."""
+    _check_site_allows(voice=voice, media=True)
     _check_uuid(client_uuid)
     if (old := _existing(user.id, client_uuid)):
         return old, False
@@ -197,18 +211,16 @@ def poll(user: User, conv: Conversation, after_id: int, since: datetime | None):
 
 
 # ------------------------------------------------------------------ status
-def mark_delivered(user: User, conv: Conversation, ids=None) -> int:
-    if ids is not None and not ids:
+def mark_delivered_upto(user: User, conv: Conversation, upto_id: int) -> int:
+    """Delivered = the recipient's DEVICE confirmed it received the push (see push_service.acknowledge_receipt).
+    Opening a page or asking for the chat list does not count: the browser cannot prove a message arrived.
+    Only 'sent' messages from the OTHER person move forward; seen is never moved back."""
+    if not upto_id:
         return 0
-    q = Message.query.filter(
-        Message.conversation_id == conv.id, Message.sender_id != user.id, Message.status == "sent"
-    )
-    if ids is not None:
-        q = q.filter(Message.id.in_(ids))
-    n = q.update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
-    if n:
-        db.session.commit()
-    return n
+    return Message.query.filter(
+        Message.conversation_id == conv.id, Message.sender_id != user.id,
+        Message.status == "sent", Message.id <= upto_id,
+    ).update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
 
 
 def mark_seen(user: User, conv: Conversation, upto_id: int | None = None) -> int:

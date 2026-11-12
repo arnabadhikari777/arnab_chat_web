@@ -302,3 +302,70 @@ def test_settings_push_card_has_no_hardcoded_error_codes(app, duo):
     for code in ("not_configured", "no_sw", "save_failed"):
         assert code not in html
     assert "data-push-enable" in html and "data-push-status" in html
+
+
+# ================================================================ device receipt (Delivered tick)
+def test_a_message_push_carries_a_signed_receipt_token(app, duo, configured, sent):
+    subscribe(duo)
+    say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    payload = sent.calls[0]["payload"]
+    assert isinstance(payload.get("ack"), str) and len(payload["ack"]) < 1000
+    assert "hi" not in str(payload)                              # still no private text in the push
+
+
+def test_non_message_pushes_have_no_receipt_token(app, duo, configured, sent):
+    subscribe(duo)
+    n = Notification(user_id=duo.bob.id, type="announcement", payload={"announcement_id": 1}, link="/x", dedupe_key="a2")
+    db.session.add(n)
+    db.session.commit()
+    push_service.enqueue_and_send(n)
+    assert sent.calls and "ack" not in sent.calls[0]["payload"]
+
+
+def test_push_accepted_by_the_push_service_is_not_yet_delivered(app, duo, configured, sent):
+    """Accepted by FCM / Mozilla / Apple only means 'queued'. The tick must wait for the phone."""
+    from app.models import Message
+    subscribe(duo)
+    say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    assert PushDelivery.query.one().status == "accepted"
+    assert PushDelivery.query.one().acked_at is None
+    assert Message.query.one().status == "sent"
+
+
+def test_phone_receipt_makes_the_message_delivered_and_records_the_device(app, duo, configured, sent):
+    from app.models import Message
+    subscribe(duo)
+    for i in range(3):
+        say(duo.a, duo, f"m{i}", f"uuid-000{i}-aaaa")
+    token = sent.calls[-1]["payload"]["ack"]                     # the newest push: it announces all three
+    res = app.test_client().post("/api/push/ack", json={"token": token})
+    assert res.get_json() == {"ok": True, "updated": 3}
+    assert {m.status for m in Message.query.all()} == {"delivered"}
+    assert PushDelivery.query.one().acked_at is not None
+
+
+def test_receipt_of_an_older_push_only_delivers_what_it_announced(app, duo, configured, sent):
+    from app.models import Message
+    subscribe(duo)
+    say(duo.a, duo, "m0", "uuid-0000-aaaa")
+    say(duo.a, duo, "m1", "uuid-0001-aaaa")
+    app.test_client().post("/api/push/ack", json={"token": sent.calls[0]["payload"]["ack"]})
+    assert [m.status for m in Message.query.order_by(Message.id)] == ["delivered", "sent"]
+
+
+def test_failed_push_never_produces_a_delivered_tick(app, duo, configured, sent):
+    from app.models import Message
+    subscribe(duo)
+    sent.result = ("failed", "503")
+    say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    assert Message.query.one().status == "sent"
+
+
+def test_each_device_gets_its_own_receipt_token(app, duo, configured, sent):
+    subscribe(duo, "b", 1)
+    subscribe(duo, "b", 2)
+    say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    tokens = {c["payload"]["ack"] for c in sent.calls}
+    assert len(sent.calls) == 2 and len(tokens) == 2
+    app.test_client().post("/api/push/ack", json={"token": sent.calls[0]["payload"]["ack"]})
+    assert PushDelivery.query.filter(PushDelivery.acked_at.isnot(None)).count() == 1

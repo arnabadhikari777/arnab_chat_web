@@ -20,8 +20,7 @@ def admin_rules(app):
 
 
 def fill(rule):
-    return (rule.rule.replace("<int:user_id>", "1").replace("<int:report_id>", "1")
-            .replace("<int:announcement_id>", "1").replace("<int:sub_id>", "1").replace("<name>", "goppo-20260101-000000.db"))
+    return rule.rule.replace("<int:user_id>", "1").replace("<int:report_id>", "1").replace("<int:announcement_id>", "1")
 
 
 def test_admin_routes_exist(app):

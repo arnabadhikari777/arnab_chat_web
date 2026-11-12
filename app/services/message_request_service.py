@@ -52,6 +52,10 @@ def start_conversation(me: User, other: User):
 
 
 def send_request(me: User, other: User) -> MessageRequest:
+    from . import site_settings
+
+    if not site_settings.enabled("requests_enabled"):
+        raise ServiceError("site.requests_off")
     if me.id == other.id:
         raise ServiceError("request.self")
     if conversation_service.find_between(me.id, other.id):

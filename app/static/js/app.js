@@ -128,3 +128,10 @@
 
   window.app = { fmtTime, fmtDay, fmtStamp, lastSeen, sameDay, api, toast, confirmDialog, t, ready };
 })();
+
+
+/* Confirmation dialog for risky forms:  <form data-confirm="Are you sure?"> */
+document.addEventListener("submit", (e) => {
+  const message = e.target && e.target.dataset ? e.target.dataset.confirm : "";
+  if (message && !window.confirm(message)) e.preventDefault();
+});

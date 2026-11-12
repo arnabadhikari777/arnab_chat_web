@@ -30,11 +30,16 @@ _DUMMY_HASH = generate_password_hash("not-a-real-password")
 # ---------- admin role ----------
 def sync_admin_role(user: User) -> None:
     """Admins are exactly the VERIFIED users whose email is listed in ADMIN_EMAILS."""
-    should_be_admin = user.is_email_verified and user.email in current_app.config["ADMIN_EMAILS"]
-    wanted = "admin" if should_be_admin else "user"
-    if user.role != wanted:
-        user.role = wanted
-        current_app.logger.info("Role of %s set to %s", user.username, wanted)
+    env_admin = user.is_email_verified and user.email in current_app.config["ADMIN_EMAILS"]
+    if env_admin:                                  # the env list = super admins
+        wanted, level = "admin", "super_admin"
+    elif user.is_email_verified and user.admin_role in ("admin", "moderator"):    # granted by a super admin
+        wanted, level = "admin", user.admin_role
+    else:
+        wanted, level = "user", None
+    if user.role != wanted or user.admin_role != level:
+        user.role, user.admin_role = wanted, level
+        current_app.logger.info("Role of %s set to %s (%s)", user.username, wanted, level)
 
 
 # ---------- sending codes ----------
@@ -161,9 +166,8 @@ def log_in(identifier: str, password: str) -> User:
         raise ServiceError("auth.invalid_credentials")
     if not user.is_email_verified:
         raise NeedsVerification(user.email)
-    if user.status != "active" and user.status_until is not None:
-        from . import admin_service
-        admin_service.release_if_expired(user)
+    if user.lift_expired_suspension():
+        db.session.commit()
     if user.status == "suspended":
         raise ServiceError("auth.suspended")
     if user.status != "active":

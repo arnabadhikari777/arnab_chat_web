@@ -57,5 +57,4 @@ def bundle(lang: str | None = None) -> dict[str, str]:
 def init_i18n(app) -> None:
     @app.context_processor
     def _inject():
-        from ..services import settings_service
-        return {"t": t, "lang": get_language(), "app_name": settings_service.site_name()}
+        return {"t": t, "lang": get_language(), "app_name": app.config["APP_NAME"]}

@@ -4,7 +4,7 @@ from flask_login import current_user
 from ...extensions import limiter
 from ...middleware.guards import auth_required
 from ...services import message_request_service as requests_svc
-from ...services import people_service, report_service
+from ...services import people_service, report_service, site_settings
 from ...services.errors import FieldErrors, ServiceError
 from . import bp
 
@@ -26,6 +26,9 @@ def _other_or_404(username: str):
 @bp.get("/people")
 @auth_required
 def index():
+    if not site_settings.enabled("people_enabled"):
+        flash("site.people_off", "error")
+        return redirect(url_for("main.home"))
     q = request.args.get("q", "")
     page = _page_number()
     users, has_next = people_service.list_people(current_user, q, page)

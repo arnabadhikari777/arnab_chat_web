@@ -7,8 +7,8 @@
   <span class="topbar__title">{{ t('admin.title') }}</span>
 </header>
 <nav class="admin-nav" aria-label="Admin">
-  {% for key, endpoint in [('dashboard','admin.dashboard'),('users','admin.users'),('reports','admin.reports'),('announcements','admin.announcements'),('settings','admin.settings'),('database','admin.database'),('security','admin.security'),('audit','admin.audit')] %}
-    <a href="{{ url_for(endpoint) }}" {% if section == key %}aria-current="page"{% endif %}>{{ t('admin.nav.' ~ key) }}</a>
+  {% for key, endpoint, perm in [('dashboard','admin.dashboard','admin.view'),('users','admin.users','users.view'),('reports','admin.reports','reports.manage'),('announcements','admin.announcements','announcements.manage'),('settings','admin.settings','settings.manage'),('staff','admin.staff','staff.manage'),('audit','admin.audit','audit.view')] %}
+    {% if can(perm) %}<a href="{{ url_for(endpoint) }}" {% if section == key %}aria-current="page"{% endif %}>{{ t('admin.nav.' ~ key) }}</a>{% endif %}
   {% endfor %}
 </nav>
 <main class="page">

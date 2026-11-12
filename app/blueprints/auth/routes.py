@@ -9,7 +9,7 @@ from flask_login import current_user, login_user, logout_user
 from ...extensions import limiter
 from ...i18n import get_language
 from ...middleware.guards import safe_next
-from ...services import auth_service, otp_service, security_service
+from ...services import auth_service, otp_service, site_settings
 from ...services.errors import (
     EmailDeliveryError,
     FieldErrors,
@@ -43,7 +43,6 @@ def _start_session(user, next_url: str | None = None):
     _rotate_session()
     session.permanent = True
     login_user(user)
-    security_service.record("login", user.id)
     return redirect(safe_next(next_url, url_for("main.home")))
 
 
@@ -69,6 +68,9 @@ def _pending(purpose: str):
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("main.home"))
+    if not site_settings.enabled("registration_enabled"):
+        flash("site.registration_off", "error")
+        return redirect(url_for("auth.login"))
     form, errors = {}, {}
     if request.method == "POST":
         form = request.form
@@ -147,6 +149,16 @@ def resend_verification():
 
 
 # ---------------------------------------------------------------- login / logout
+def _login_blocked_key(user):
+    """Admin switch "login": closed for normal accounts (also during maintenance). Admins always get in."""
+    if user.is_admin:
+        return None
+    if site_settings.enabled("maintenance_mode"):
+        return "site.maintenance_login"
+    if not site_settings.enabled("login_enabled"):
+        return "site.login_off"
+    return None
+
 @bp.route("/login", methods=["GET", "POST"])
 @limiter.limit("10 per minute;60 per hour", methods=["POST"])
 @limiter.limit(lambda: current_app.config["LOGIN_ACCOUNT_LIMIT"], key_func=_login_account_key, methods=["POST"])
@@ -169,12 +181,12 @@ def login():
             return redirect(url_for("auth.verify_email"))
         except ServiceError as exc:
             error = (exc.key, exc.values)
-            security_service.record("login_failed", None, identifier.strip().lower())
         else:
-            from ...services import settings_service
-            if settings_service.enabled("login_open") or user.is_admin:   # admins can always sign in
+            key = _login_blocked_key(user)
+            if key:
+                error = (key, {})
+            else:
                 return _start_session(user, next_url)
-            error = ("site.login_closed", {})
     return render_template("auth/login.html", error=error, identifier=identifier, next_url=next_url or "")
 
 
@@ -298,10 +310,12 @@ def sso_login():
     if not user.is_active:
         flash("flash.login_required", "error")
         return redirect(url_for("auth.login"))
+    if _login_blocked_key(user):
+        flash(_login_blocked_key(user), "error")
+        return redirect(url_for("auth.login"))
 
     _rotate_session()
     session.permanent = True
     login_user(user)
-    security_service.record("login", user.id, "sso")
     return redirect(url_for("main.home"))
 

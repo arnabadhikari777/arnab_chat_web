@@ -1,7 +1,6 @@
 {% extends "admin/layout.html" %}
 {% block content %}
 <h2>{{ t('admin.nav.dashboard') }}</h2>
-{% if site.maintenance_mode %}<p class="banner banner--error" role="status">{{ t('admin.settings.maintenance_on') }} <a href="{{ url_for('admin.settings') }}">{{ t('admin.nav.settings') }}</a></p>{% endif %}
 <div class="stats">
   {% for key, value in [
     ('users_total', s.users_total), ('users_verified', s.users_verified), ('online_now', s.online_now),
@@ -9,15 +8,15 @@
     ('users_public', s.users_public), ('users_private', s.users_private),
     ('users_suspended', s.users_suspended), ('users_banned', s.users_banned),
     ('conversations', s.conversations), ('messages_total', s.messages_total), ('messages_day', s.messages_day),
-    ('requests_pending', s.requests_pending), ('reports_open', s.reports_open), ('announcements_active', s.announcements_active)] %}
+    ('requests_pending', s.requests_pending), ('reports_open', s.reports_open), ('announcements_active', s.announcements_active),
+    ('notices_unread', s.notices_unread), ('push_devices', s.push_devices), ('push_devices_bad', s.push_devices_bad),
+    ('push_receipts_day', s.push_receipts_day), ('push_problems_day', s.push_problems_day)] %}
     <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
   {% endfor %}
 </div>
-<h3>{{ t('admin.nav.security') }}</h3>
-<div class="stats">
-  {% for key, value in [('notices_total', ps.notices_total), ('notices_unread', ps.notices_unread), ('push_active', ps.push_active), ('push_acked', ps.push_acked), ('push_failed', ps.push_failed), ('push_unacked', ps.push_unacked)] %}
-    <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
-  {% endfor %}
-</div>
+<h3>{{ t('admin.recent_events') }}</h3>
+{% for e in events %}
+  <p class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ e.action }}{% if e.target_type %} · {{ e.target_type }} #{{ e.target_id or '' }}{% endif %}</p>
+{% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}
 <p class="muted">{{ t('admin.privacy_note') }}</p>
 {% endblock %}

@@ -12,12 +12,14 @@ def app():
     # Tests keep one app context open for the whole test, but a real server gives
     # every request a fresh one. Without this, Flask-Login would remember the user of
     # the previous request and several browsers in one test would be mixed up.
-    @app.before_request
     def _fresh_request_state():
         from flask import g
 
         g.pop("_login_user", None)
         db.session.expire_all()
+
+    # Insert FIRST: the app's own before_request hooks (maintenance gate, presence) read current_user.
+    app.before_request_funcs.setdefault(None, []).insert(0, _fresh_request_state)
 
     with app.app_context():
         db.create_all()

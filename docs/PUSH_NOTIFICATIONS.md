@@ -36,3 +36,20 @@ Do **not** regenerate the keys later: every phone would have to press Enable aga
 
 ## Verified vs not verified
 See the delivery report. Short version: logic is unit-tested; real delivery to a real phone must be checked on your live site.
+
+
+## Delivered tick = the phone confirmed the push (device receipt)
+
+Rule: a message becomes **Delivered** only when the recipient's phone/browser really received the push.
+
+1. Every new-message push carries a signed, per-device receipt token (`ack`), bound to the recipient, the chat and the newest message that push announces. It contains no message text.
+2. The service worker (`sw.js`) shows the notification, then POSTs the token to `/api/push/ack` (no cookies, so a background receipt never makes the person look "online").
+3. The server verifies the signature and age (`PUSH_ACK_MAX_AGE_SECONDS`), re-checks that the person is an active member of the chat, then marks that chat's `sent` messages up to the announced id as `delivered` and stamps `push_deliveries.acked_at`.
+4. If the phone has no connection at that moment, the token is kept in the service worker cache and re-sent on the next push or app start.
+
+What no longer makes a message Delivered: opening the website, opening the chat list, `/api/conversations/<id>/delivered` (kept only as a harmless no-op for old cached pages). A push merely *accepted* by FCM / Mozilla / Apple stays `sent`.
+Offline phone or failed push: the message stays **Sent**; when the phone comes back and the queued push arrives, the receipt arrives and it turns Delivered. **Seen** still implies Delivered.
+
+Consequences you should know: no push subscription, notifications switched off by the recipient (`notify_messages`), or browser-blocked notifications = the message stays Sent until the chat is actually viewed (Seen). Real receipt delivery cannot be proven in automated tests; check it once on a real phone.
+
+Migration: `flask db upgrade` (adds nullable `push_deliveries.acked_at`; reversible).

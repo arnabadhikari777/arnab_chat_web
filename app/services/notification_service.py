@@ -123,14 +123,3 @@ def mark_displayed(user_id: int, notification_ids: list[int]) -> int:
     )
     db.session.commit()
     return n
-
-
-def clear_all(user_id: int) -> int:
-    """Permanently delete EVERY notification row of this one user. Returns how many were deleted.
-
-    The only filter is the caller's own id and there is no other argument, so there is no way to point it at
-    someone else. Push delivery rows of those notices go with them (ON DELETE CASCADE).
-    """
-    n = Notification.query.filter(Notification.user_id == user_id).delete(synchronize_session=False)
-    db.session.commit()
-    return n

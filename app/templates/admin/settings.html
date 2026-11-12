@@ -1,71 +1,23 @@
 {% extends "admin/layout.html" %}
-{% from "partials/macros.html" import csrf, err with context %}
-{% macro toggle(key, label, hint) %}
-  <label class="choice"><input type="checkbox" name="{{ key }}" {% set on = (form.get(key) == 'on') if form is not none else v[key] %}{% if on %}checked{% endif %}>
-    <span class="choice__body"><strong>{{ t(label) }}</strong><span class="muted">{{ t(hint) }}</span></span></label>
-{% endmacro %}
-{% macro text(key, label, hint, area=false) %}
-  <label class="field__label" for="s-{{ key }}">{{ t(label) }}</label>
-  {% set val = form.get(key, '') if form is not none else v[key] %}
-  {% if area %}<textarea class="input" id="s-{{ key }}" name="{{ key }}" rows="3" maxlength="300">{{ val }}</textarea>
-  {% else %}<input class="input" id="s-{{ key }}" name="{{ key }}" value="{{ val }}" maxlength="120">{% endif %}
-  {{ err(errors, key) }}<p class="field__hint">{{ t(hint) }}</p>
-{% endmacro %}
+{% from "partials/macros.html" import err, csrf with context %}
 {% block content %}
 <h2>{{ t('admin.nav.settings') }}</h2>
 <p class="muted">{{ t('admin.settings.intro') }}</p>
-<form method="post" class="stack" id="settings-form" data-maintenance="{{ 1 if v.maintenance_mode else 0 }}">
+<form method="post" class="stack" data-confirm="{{ t('admin.settings.confirm') }}" novalidate>
   {{ csrf() }}
-  <details class="card" open>
-    <summary><strong>{{ t('admin.settings.g_status') }}</strong></summary>
-    {{ toggle('maintenance_mode', 'admin.settings.maintenance', 'admin.settings.maintenance_hint') }}
-    {{ text('maintenance_message', 'admin.settings.maintenance_message', 'admin.settings.maintenance_message_hint', true) }}
-  </details>
-  <details class="card">
-    <summary><strong>{{ t('admin.settings.g_access') }}</strong></summary>
-    {{ toggle('registration_open', 'admin.settings.registration', 'admin.settings.registration_hint') }}
-    {{ toggle('login_open', 'admin.settings.login', 'admin.settings.login_hint') }}
-  </details>
-  <details class="card">
-    <summary><strong>{{ t('admin.settings.g_chat') }}</strong></summary>
-    {{ toggle('chat_enabled', 'admin.settings.chat', 'admin.settings.chat_hint') }}
-    {{ toggle('message_requests_enabled', 'admin.settings.requests', 'admin.settings.requests_hint') }}
-    {{ toggle('sending_enabled', 'admin.settings.sending', 'admin.settings.sending_hint') }}
-  </details>
-  <details class="card">
-    <summary><strong>{{ t('admin.settings.g_notify') }}</strong></summary>
-    {{ toggle('push_enabled', 'admin.settings.push', 'admin.settings.push_hint') }}
-    {{ toggle('announcements_enabled', 'admin.settings.announcements', 'admin.settings.announcements_hint') }}
-  </details>
-  <details class="card">
-    <summary><strong>{{ t('admin.settings.g_public') }}</strong></summary>
-    {{ text('site_name', 'admin.settings.site_name', 'admin.settings.site_name_hint') }}
-    {{ text('public_contact', 'admin.settings.public_contact', 'admin.settings.public_contact_hint') }}
-  </details>
-  <button class="btn btn--block" type="submit" id="settings-save">{{ t('common.save') }}</button>
+  {% for key in switches %}
+    {% set checked = (form.get(key) == '1') if form else cfg[key] %}
+    <label class="switch-row" for="s-{{ key }}">
+      <span>{{ t('admin.set.' ~ key) }}{% if key == 'maintenance_mode' %}<br><small class="muted">{{ t('admin.set.maintenance_hint') }}</small>{% elif key == 'login_enabled' %}<br><small class="muted">{{ t('admin.set.login_hint') }}</small>{% endif %}</span>
+      <input type="checkbox" id="s-{{ key }}" name="{{ key }}" value="1" {% if checked %}checked{% endif %}>
+    </label>
+  {% endfor %}
+  <div class="field"><label class="field__label" for="maintenance_message">{{ t('admin.set.maintenance_message') }}</label>
+    <textarea class="input input--area" id="maintenance_message" name="maintenance_message" rows="3" maxlength="500">{{ form.get('maintenance_message', cfg.maintenance_message) if form else cfg.maintenance_message }}</textarea>{{ err(errors, 'maintenance_message') }}</div>
+  <div class="field"><label class="field__label" for="site_announcement">{{ t('admin.set.site_announcement') }}</label>
+    <input class="input" id="site_announcement" name="site_announcement" maxlength="300" value="{{ form.get('site_announcement', cfg.site_announcement) if form else cfg.site_announcement }}">
+    <p class="field__hint">{{ t('admin.set.site_announcement_hint') }}</p>{{ err(errors, 'site_announcement') }}</div>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('common.save') }}</button>
 </form>
-{% endblock %}
-{% block scripts %}
-<script>
-(function () {
-  const form = document.getElementById("settings-form");
-  if (!form || !window.app) return;
-  let go = false;
-  form.addEventListener("submit", async (e) => {
-    if (go) return;
-    e.preventDefault();
-    const btn = document.getElementById("settings-save");
-    if (btn.disabled) return;                                            // no double submit
-    const turningOn = form.elements.maintenance_mode.checked && form.dataset.maintenance !== "1";
-    if (turningOn) {
-      const yes = await window.app.confirmDialog({
-        title: window.app.t("admin.settings.maint_title"), text: window.app.t("admin.settings.maint_text"),
-        confirmLabel: window.app.t("admin.settings.maint_confirm"), danger: true });
-      if (!yes) return;
-    }
-    btn.disabled = true; go = true;
-    form.submit();
-  });
-})();
-</script>
+<p class="muted">{{ t('admin.settings.hosting_note') }}</p>
 {% endblock %}

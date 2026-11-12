@@ -5,6 +5,7 @@
    Also handles Web Push: shows notifications and opens the right page on click.
 */
 const CACHE = "goppo-v6";
+const ACK_CACHE = "goppo-pending-acks";   // receipts that could not be sent yet (phone just lost its connection)
 const PRECACHE = [
   "/static/css/tokens.css",
   "/static/css/base.css",
@@ -27,7 +28,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== ACK_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -36,7 +37,51 @@ self.addEventListener("message", (event) => {
   if (event.data === "clear-caches") {
     event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))));
   }
+  if (event.data === "flush-acks") event.waitUntil(flushPendingAcks());
 });
+
+/* ---- Delivery receipt ----
+   "Delivered" means: this phone's service worker really received the push. The signed token in the push is
+   sent back to the server. No cookies are sent (credentials omitted): the token is the proof, and a background
+   receipt must not make the person look "online". If the phone has no connection at this very moment, the
+   token is kept and re-sent on the next push / app start. The server drops tokens that are too old. */
+const ACK_URL = "/api/push/ack";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function postAck(token) {
+  // true = done (stored or rejected for good), false = try again later
+  try {
+    const res = await fetch(ACK_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }), credentials: "omit", keepalive: true,
+    });
+    if (res.ok || res.status === 400) return true;     // 400 = expired / invalid: never retry it
+    return false;
+  } catch (_) { return false; }
+}
+
+async function sendAck(token) {
+  if (!token || typeof token !== "string") return;
+  for (const wait of [0, 1500, 4000]) {
+    if (wait) await sleep(wait);
+    if (await postAck(token)) return;
+  }
+  try {                                                  // still offline: keep it for later
+    const cache = await caches.open(ACK_CACHE);
+    await cache.put(new Request("/__ack/" + encodeURIComponent(token.slice(-40))), new Response(token));
+  } catch (_) {}
+}
+
+async function flushPendingAcks() {
+  try {
+    const cache = await caches.open(ACK_CACHE);
+    for (const req of await cache.keys()) {
+      const hit = await cache.match(req);
+      const token = hit ? await hit.text() : "";
+      if (!token || await postAck(token)) await cache.delete(req);
+    }
+  } catch (_) {}
+}
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
@@ -68,31 +113,6 @@ function safeTarget(url) {
   } catch (_) { return "/notices"; }
 }
 
-/* Delivery acknowledgement. Sent ONLY after this worker really processed the push (the notification was shown,
-   or an open page was told). It proves the device/browser received it, not that a person looked at it.
-   The single-use token came inside the push itself; the server checks it, the device endpoint and the owner.
-   No cookies are sent (credentials omitted): the token is the proof. One retry for a network hiccup. */
-async function sendAck(ack) {
-  if (!ack || !ack.id || !ack.token) return;           // an older push without a token: nothing to acknowledge
-  let endpoint = "";
-  try {
-    const sub = await self.registration.pushManager.getSubscription();
-    endpoint = sub ? sub.endpoint : "";
-  } catch (_) { /* no endpoint: the server will refuse, and that is the safe outcome */ }
-  if (!endpoint) return;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch("/api/push/ack", {
-        method: "POST", credentials: "omit", keepalive: true,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: ack.id, token: ack.token, endpoint }),
-      });
-      if (res.status < 500) return;                    // accepted, or refused for good (4xx): never retry a refusal
-    } catch (_) { /* offline: try once more */ }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-}
-
 self.addEventListener("push", (event) => {
   let data = { title: "Goppo", body: "New notification", url: "/notices", tag: "goppo" };
   try {
@@ -104,12 +124,12 @@ self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     const open = await clients.matchAll({ type: "window", includeUncontrolled: true });
     // The app is open and in front: the in-app badge already shows it, so no duplicate system notification.
-    // The page is told to refresh its counters right away. The push WAS received and handed to the page,
-    // so it is acknowledged; if telling the page throws, nothing is acknowledged.
+    // The page is told to refresh its counters right away.
     const inFront = open.filter((c) => c.visibilityState === "visible" && c.focused);
     if (inFront.length) {
       inFront.forEach((c) => c.postMessage({ type: "push-received", url: target }));
       await sendAck(data.ack);
+      await flushPendingAcks();
       return;
     }
     await self.registration.showNotification(data.title || "Goppo", {
@@ -121,7 +141,9 @@ self.addEventListener("push", (event) => {
       data: { url: target, notification_id: data.notification_id },
       vibrate: [80, 40, 80],
     });
-    await sendAck(data.ack);                 // only reached if showNotification succeeded
+    // Only after the notification was really handed to the system do we confirm receipt.
+    await sendAck(data.ack);
+    await flushPendingAcks();
   })());
 });
 

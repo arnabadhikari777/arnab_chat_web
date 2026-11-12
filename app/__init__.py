@@ -8,7 +8,11 @@ from .utils.logging_setup import configure_logging
 from .utils.security import register_security_headers
 
 
-_NO_PRESENCE = {"static", "main.health", "main.i18n_bundle", "main.service_worker"}
+# Reachable even in maintenance mode: assets, health check, translations, the service worker and the
+# delivery receipt, plus login/logout (so an admin can always sign in).
+_MAINTENANCE_OPEN = {"static", "main.health", "main.i18n_bundle", "main.service_worker", "chat.push_ack",
+                     "auth.login", "auth.logout"}
+_NO_PRESENCE = {"static", "main.health", "main.i18n_bundle", "main.service_worker", "chat.push_ack"}
 
 
 def create_app(config_name: str | None = None) -> Flask:
@@ -47,9 +51,6 @@ def create_app(config_name: str | None = None) -> Flask:
         if not raw_id.isdigit() or not fingerprint:
             return None
         user = db.session.get(models.User, int(raw_id))
-        if user is not None and user.status != "active" and user.status_until is not None:
-            from .services import admin_service
-            admin_service.release_if_expired(user)        # a timed suspension that ran out
         if (user and user.is_active and user.is_email_verified
                 and hmac.compare_digest(user.session_fingerprint(), fingerprint)):
             return user
@@ -59,9 +60,6 @@ def create_app(config_name: str | None = None) -> Flask:
     from .middleware.guards import register_guards
 
     register_guards(app)
-    from .middleware.site_gate import register_site_gate
-
-    register_site_gate(app)
     register_cli(app)
     init_i18n(app)
     register_error_handlers(app)
@@ -92,6 +90,31 @@ def create_app(config_name: str | None = None) -> Flask:
     from flask_login import current_user
 
     from .services import presence_service
+
+    @app.before_request
+    def _site_gate():
+        """Ends a finished timed suspension, and enforces maintenance mode (admins are never locked out)."""
+        from flask import jsonify, render_template
+
+        from .i18n import t
+        from .services import site_settings
+
+        if current_user.is_authenticated and current_user.lift_expired_suspension():
+            db.session.commit()
+        endpoint = request.endpoint
+        if endpoint is None or endpoint in _MAINTENANCE_OPEN or not site_settings.enabled("maintenance_mode"):
+            return None
+        if current_user.is_authenticated and current_user.is_admin:
+            return None
+        message = site_settings.get("maintenance_message") or t("site.maintenance_default")
+        if request.path.startswith("/api/"):
+            return jsonify({"ok": False, "error": {"code": "maintenance", "message": message}}), 503
+        return render_template("errors/error.html", title=t("site.maintenance_title"), message=message), 503
+
+    @app.context_processor
+    def _site_banner():
+        from .services import site_settings
+        return {"site_banner": site_settings.get("site_announcement")}
 
     @app.before_request
     def _presence_heartbeat():

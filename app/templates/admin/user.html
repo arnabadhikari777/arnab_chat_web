@@ -8,8 +8,8 @@
 <dl class="facts">
   <dt>{{ t('field.email') }}</dt><dd>{{ target.email }}</dd>
   <dt>{{ t('admin.user.verified') }}</dt><dd>{{ t('common.yes') if target.is_email_verified else t('common.no') }}</dd>
-  <dt>{{ t('admin.user.role') }}</dt><dd>{{ target.role }}</dd>
-  <dt>{{ t('admin.user.status') }}</dt><dd>{{ t('admin.status.' ~ target.status) }}</dd>
+  <dt>{{ t('admin.user.role') }}</dt><dd>{% if target.staff_level %}{{ t('admin.level.' ~ target.staff_level) }}{% else %}{{ target.role }}{% endif %}</dd>
+  <dt>{{ t('admin.user.status') }}</dt><dd>{{ t('admin.status.' ~ target.status) }}{% if target.status == 'suspended' and target.suspended_until %} · {{ t('admin.user.until') }} {{ target.suspended_until.strftime('%Y-%m-%d %H:%M') }} UTC{% endif %}</dd>
   <dt>{{ t('admin.user.joined') }}</dt><dd>{{ target.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</dd>
   <dt>{{ t('admin.user.last_seen') }}</dt><dd>{% if d.online %}{{ t('status.online') }}{% elif target.last_seen_at %}{{ target.last_seen_at.strftime('%Y-%m-%d %H:%M') }} UTC{% else %}-{% endif %}</dd>
   <dt>{{ t('admin.user.language') }}</dt><dd>{{ target.language }}</dd>
@@ -21,27 +21,29 @@
 {% if target.is_admin or target.id == current_user.id %}
   <p class="banner banner--success">{{ t('admin.user.protected') }}</p>
 {% else %}
-  <form method="post" action="{{ url_for('admin.user_status', user_id=target.id) }}" class="stack">
+  <form method="post" action="{{ url_for('admin.user_status', user_id=target.id) }}" class="stack" data-confirm="{{ t('admin.user.status_confirm') }}">
     {{ csrf() }}
     <label class="field__label" for="status">{{ t('admin.user.change_status') }}</label>
     <select class="input" id="status" name="status">
-      {% for st in ['active','suspended','banned'] %}<option value="{{ st }}" {% if target.status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
+      {% for st in (['active','suspended','banned'] if can('users.ban') else ['active','suspended']) %}<option value="{{ st }}" {% if target.status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
     </select>
     <label class="field__label" for="days">{{ t('admin.user.days') }}</label>
-    <input class="input" id="days" name="days" type="number" min="1" max="3650" placeholder="{{ t('admin.user.days_ph') }}">
-    <p class="field__hint">{{ t('admin.user.days_hint') }}</p>
+    <input class="input" id="days" name="days" type="number" min="1" max="365" inputmode="numeric" placeholder="{{ t('admin.user.days_hint') }}">
     <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
   </form>
+  <form method="post" action="{{ url_for('admin.user_force_logout', user_id=target.id) }}" data-confirm="{{ t('admin.user.force_logout_confirm') }}">
+    {{ csrf() }}<button class="btn btn--secondary btn--block" type="submit">{{ t('admin.user.force_logout') }}</button>
+  </form>
 {% endif %}
-{% if target.status_until %}<p class="muted">{{ t('admin.user.until') }} {{ target.status_until.strftime('%Y-%m-%d %H:%M') }} UTC</p>{% endif %}
-<h3>{{ t('admin.user.devices') }}</h3>
-{% for dv in devices %}
-  <article class="card stack stack--tight">
-    <strong>{{ dv.status }}</strong>
-    <span class="muted">{{ (dv.user_agent or '-')[:80] }}</span>
-    <span class="muted">{{ t('admin.user.last_ok') }} {{ dv.last_success_at.strftime('%Y-%m-%d %H:%M') ~ ' UTC' if dv.last_success_at else '-' }}</span>
-    <form method="post" action="{{ url_for('admin.user_push_revoke', user_id=target.id, sub_id=dv.id) }}" onsubmit="return confirm('{{ t('admin.user.revoke_confirm') }}')">{{ csrf() }}
-      <button class="btn btn--ghost" type="submit">{{ t('admin.user.revoke') }}</button></form>
-  </article>
-{% else %}<p class="muted">{{ t('admin.user.no_devices') }}</p>{% endfor %}
+<h3>{{ t('admin.user.notes') }}</h3>
+<form method="post" action="{{ url_for('admin.user_note', user_id=target.id) }}" class="stack">
+  {{ csrf() }}
+  <textarea class="input input--area" name="note" rows="3" maxlength="500" required aria-label="{{ t('admin.user.notes') }}"></textarea>
+  <button class="btn btn--secondary btn--block" type="submit">{{ t('admin.user.add_note') }}</button>
+</form>
+{% for n in notes %}<article class="card"><p>{{ n.note }}</p><p class="muted">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</p></article>
+{% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}
+<h3>{{ t('admin.user.history') }}</h3>
+{% for e in history %}<p class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ e.action }}</p>
+{% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}
 {% endblock %}

@@ -7,6 +7,10 @@
     <option value="">{{ t('admin.users.all') }}</option>
     {% for st in ['active','suspended','banned'] %}<option value="{{ st }}" {% if status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
   </select>
+  <select class="input" name="privacy" aria-label="{{ t('admin.users.privacy') }}">
+    <option value="">{{ t('admin.users.all') }}</option>
+    {% for pv in ['public','private'] %}<option value="{{ pv }}" {% if privacy == pv %}selected{% endif %}>{{ t('admin.users.' ~ pv) }}</option>{% endfor %}
+  </select>
   <button class="btn btn--secondary" type="submit">{{ t('common.search') }}</button>
 </form>
 <div class="list list--flat">
@@ -19,7 +23,7 @@
   {% else %}<p class="muted center">{{ t('admin.users.none') }}</p>{% endfor %}
 </div>
 <nav class="pager">
-  {% if page > 1 %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, page=page - 1) }}">{{ t('people.prev') }}</a>{% else %}<span></span>{% endif %}
-  {% if has_next %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, page=page + 1) }}">{{ t('people.next') }}</a>{% endif %}
+  {% if page > 1 %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, privacy=privacy or None, page=page - 1) }}">{{ t('people.prev') }}</a>{% else %}<span></span>{% endif %}
+  {% if has_next %}<a class="btn btn--secondary" href="{{ url_for('admin.users', q=q or None, status=status or None, privacy=privacy or None, page=page + 1) }}">{{ t('people.next') }}</a>{% endif %}
 </nav>
 {% endblock %}
