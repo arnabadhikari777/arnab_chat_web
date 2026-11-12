@@ -103,7 +103,7 @@ def settings():
         except FieldErrors as exc:
             errors = exc.errors
     return render_template("admin/settings.html", cfg=site_settings.current(), errors=errors,
-                           switches=list(site_settings.SWITCHES), form=request.form, section="settings")
+                           switches=[k for k in site_settings.SWITCHES if k not in getattr(site_settings, "_ALIASES", {})], form=request.form, section="settings")
 
 # ------------------------------------------------------------------ announcements
 @bp.route("/announcements", methods=["GET", "POST"])

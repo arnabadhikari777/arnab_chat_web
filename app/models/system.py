@@ -95,3 +95,20 @@ class ModerationNote(db.Model):
     admin_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
     note = db.Column(db.String(500), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+class SecurityEvent(db.Model):
+    """Sign-in and security activity log for admins. Writing must never break a request."""
+
+    __tablename__ = "security_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(30), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    ip = db.Column(db.String(45))
+    detail = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (
+        db.Index("ix_security_kind_id", "kind", "id"),
+    )

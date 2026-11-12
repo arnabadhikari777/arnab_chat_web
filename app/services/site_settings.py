@@ -6,14 +6,14 @@ default, so a fresh or older database behaves exactly like before. If the table 
 
 Safeguards: maintenance mode and "login disabled" never lock out admins.
 """
-from flask import has_request_context, request
+from flask import current_app, has_request_context, request
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..extensions import db
 from ..models import SiteSetting
 from .errors import FieldErrors
 
-SWITCHES = {                      # key: default
+SWITCHES = {
     "registration_enabled": True,
     "login_enabled": True,
     "messaging_enabled": True,
@@ -24,8 +24,28 @@ SWITCHES = {                      # key: default
     "voice_enabled": True,
     "push_enabled": True,
     "maintenance_mode": False,
+    "registration_open": True,
+    "login_open": True,
+    "chat_enabled": True,
+    "message_requests_enabled": True,
+    "sending_enabled": True,
+    "announcements_enabled": True,
 }
-TEXTS = {"maintenance_message": 500, "site_announcement": 300}   # key: max length
+
+_ALIASES = {
+    "registration_open": "registration_enabled",
+    "login_open": "login_enabled",
+    "chat_enabled": "messaging_enabled",
+    "message_requests_enabled": "requests_enabled",
+    "sending_enabled": "messaging_enabled",
+}
+
+TEXTS = {
+    "maintenance_message": 500,
+    "site_announcement": 300,
+    "site_name": 40,
+    "public_contact": 120,
+}
 _CACHE_KEY = "goppo.site_settings"
 
 
@@ -40,15 +60,19 @@ def _load() -> dict:
 def _values() -> dict:
     if not has_request_context():
         return _load()
-    if _CACHE_KEY not in request.environ:
-        request.environ[_CACHE_KEY] = _load()
-    return request.environ[_CACHE_KEY]
+    cached = request.environ.get(_CACHE_KEY)
+    if cached is None:
+        cached = request.environ[_CACHE_KEY] = _load()
+    return cached
 
 
 def get(key: str):
     raw = _values().get(key)
-    if key in SWITCHES:
-        return SWITCHES[key] if raw is None else raw == "1"
+    if raw is None and key in _ALIASES:
+        raw = _values().get(_ALIASES[key])
+    if key in SWITCHES or key in _ALIASES:
+        default = SWITCHES.get(key, SWITCHES.get(_ALIASES.get(key, ""), True))
+        return default if raw is None else raw == "1"
     return raw or ""
 
 
@@ -57,7 +81,16 @@ def enabled(key: str) -> bool:
 
 
 def current() -> dict:
-    return {key: get(key) for key in (*SWITCHES, *TEXTS)}
+    keys = list(dict.fromkeys([*SWITCHES, *TEXTS]))
+    return {key: get(key) for key in keys}
+
+
+def site_name() -> str:
+    try:
+        return get("site_name") or current_app.config.get("APP_NAME", "Goppo")
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        return current_app.config.get("APP_NAME", "Goppo")
 
 
 def update(admin, form) -> dict:
@@ -66,23 +99,38 @@ def update(admin, form) -> dict:
 
     stored = _load()
     changes, rows = {}, {}
+    form_has_switch = any(k in form for k in SWITCHES) or any(a in form for a in _ALIASES)
+
     for key, default in SWITCHES.items():
-        new = "1" if form.get(key) == "1" else "0"
+        if key in _ALIASES:
+            continue  # store only under canonical names
+        if form_has_switch:
+            new = "1" if form.get(key) in ("1", "on", "true") or any(
+                form.get(a) in ("1", "on", "true") for a, c in _ALIASES.items() if c == key
+            ) else "0"
+        else:
+            continue
         old = stored.get(key, "1" if default else "0")
+        if old not in ("0", "1"):
+            old = "1" if default else "0"
         if new != old:
             changes[key] = {"from": old == "1", "to": new == "1"}
             rows[key] = new
+
     errors = {}
     for key, limit in TEXTS.items():
+        if key not in form:
+            continue
         new = (form.get(key) or "").strip()
         if len(new) > limit:
             errors[key] = ("err.setting_too_long", {"max": limit})
             continue
         if new != stored.get(key, ""):
-            changes[key] = {"from": "text", "to": "text"}      # the text itself is not copied into the log
+            changes[key] = {"from": "text", "to": "text"}
             rows[key] = new
     if errors:
         raise FieldErrors(errors)
+
     for key, value in rows.items():
         row = db.session.get(SiteSetting, key)
         if row is None:

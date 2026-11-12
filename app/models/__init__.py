@@ -1,6 +1,14 @@
 from .chat import Conversation, Message, MessageAttachment, MessageDeletion
 from .social import MessageRequest, Notification
-from .system import Announcement, AdminAuditLog, ModerationNote, OtpVerification, Report, SiteSetting
+from .system import (
+    Announcement,
+    AdminAuditLog,
+    ModerationNote,
+    OtpVerification,
+    Report,
+    SiteSetting,
+    SecurityEvent,
+)
 from .user import User
 from .push import PushSubscription, PushDelivery
 
@@ -18,6 +26,7 @@ __all__ = [
     "AdminAuditLog",
     "ModerationNote",
     "SiteSetting",
+    "SecurityEvent",
     "PushSubscription",
     "PushDelivery",
 ]

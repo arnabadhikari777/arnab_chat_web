@@ -32,20 +32,20 @@ def fresh(user):
 def test_timed_suspension_blocks_then_ends_by_itself(app, site):
     status(site, site.alice, "suspended", "2")
     u = fresh(site.alice)
-    assert u.status == "suspended" and u.status_until > utcnow() + timedelta(days=1)
+    assert u.status == "suspended" and u.suspended_until > utcnow() + timedelta(days=1)
     assert site.a.get("/api/summary").status_code == 401
-    u.status_until = utcnow() - timedelta(minutes=1)                  # the two days have passed
+    u.suspended_until = utcnow() - timedelta(minutes=1)                  # the two days have passed
     db.session.commit()
     again = app.test_client()
     assert again.post("/login", data={"identifier": "alice", "password": "secret123"}).status_code == 302
-    assert fresh(site.alice).status == "active" and fresh(site.alice).status_until is None
+    assert fresh(site.alice).status == "active" and fresh(site.alice).suspended_until is None
     assert AdminAuditLog.query.filter_by(action="user.status_expired").count() == 1
 
 
 def test_an_expired_suspension_also_ends_for_an_already_open_session(app, site):
     status(site, site.alice, "suspended", "1")
     u = fresh(site.alice)
-    u.status_until = utcnow() - timedelta(seconds=5)
+    u.suspended_until = utcnow() - timedelta(seconds=5)
     db.session.commit()
     assert site.a.get("/api/summary").status_code in (200, 401)       # the session was signed out earlier: 401 is fine too
     assert fresh(site.alice).status == "active"
@@ -53,7 +53,7 @@ def test_an_expired_suspension_also_ends_for_an_already_open_session(app, site):
 
 def test_without_days_it_lasts_until_an_admin_changes_it(app, site):
     status(site, site.alice, "banned")
-    assert fresh(site.alice).status_until is None
+    assert fresh(site.alice).suspended_until is None
     assert app.test_client().post("/login", data={"identifier": "alice", "password": "secret123"}).status_code == 200
 
 
@@ -66,7 +66,7 @@ def test_bad_day_counts_change_nothing(app, site, days):
 def test_restoring_clears_the_end_date(app, site):
     status(site, site.alice, "suspended", "5")
     status(site, site.alice, "active")
-    assert fresh(site.alice).status == "active" and fresh(site.alice).status_until is None
+    assert fresh(site.alice).status == "active" and fresh(site.alice).suspended_until is None
 
 
 # ------------------------------------------------------------------ sign-in log
