@@ -161,6 +161,9 @@ def log_in(identifier: str, password: str) -> User:
         raise ServiceError("auth.invalid_credentials")
     if not user.is_email_verified:
         raise NeedsVerification(user.email)
+    if user.status != "active" and user.status_until is not None:
+        from . import admin_service
+        admin_service.release_if_expired(user)
     if user.status == "suspended":
         raise ServiceError("auth.suspended")
     if user.status != "active":

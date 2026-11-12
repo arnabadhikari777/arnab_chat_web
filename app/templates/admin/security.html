@@ -1,0 +1,22 @@
+{% extends "admin/layout.html" %}
+{% block content %}
+<h2>{{ t('admin.nav.security') }}</h2>
+<div class="stats">
+  {% for key, value in [('push_active', ps.push_active), ('push_acked', ps.push_acked), ('push_failed', ps.push_failed), ('push_unacked', ps.push_unacked)] %}
+    <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
+  {% endfor %}
+</div>
+<details class="card" open><summary><strong>{{ t('admin.sec.failed') }}</strong></summary>
+  {% for e in failed %}<p class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ e.detail or '-' }} · {{ e.ip or '-' }}</p>
+  {% else %}<p class="muted">{{ t('admin.sec.none') }}</p>{% endfor %}</details>
+<details class="card"><summary><strong>{{ t('admin.sec.logins') }}</strong></summary>
+  {% for e in logins %}<p class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · @{{ names.get(e.user_id, '?') }}{% if e.detail %} · {{ e.detail }}{% endif %} · {{ e.ip or '-' }}</p>
+  {% else %}<p class="muted">{{ t('admin.sec.none') }}</p>{% endfor %}</details>
+<details class="card"><summary><strong>{{ t('admin.sec.push_bad') }}</strong></summary>
+  {% for d in push_bad %}<p class="muted">{{ d.updated_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ d.status }} · {{ t('admin.sec.attempts') }} {{ d.attempt_count }}</p>
+  {% else %}<p class="muted">{{ t('admin.sec.none') }}</p>{% endfor %}</details>
+<details class="card"><summary><strong>{{ t('admin.sec.admin_actions') }}</strong></summary>
+  {% for r in recent_admin %}<p class="muted">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ r.action }}</p>{% endfor %}
+  <a class="btn btn--secondary" href="{{ url_for('admin.audit') }}">{{ t('admin.nav.audit') }}</a></details>
+<p class="muted">{{ t('admin.sec.note') }}</p>
+{% endblock %}

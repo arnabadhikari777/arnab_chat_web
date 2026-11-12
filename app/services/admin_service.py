@@ -5,7 +5,7 @@ from flask import current_app, url_for
 from sqlalchemy import func, or_
 
 from ..extensions import db
-from ..models import (AdminAuditLog, Announcement, Conversation, Message, MessageRequest,
+from ..models import (AdminAuditLog, Announcement, Conversation, Message, MessageRequest, PushDelivery, PushSubscription,
                       Notification, Report, User)
 from ..utils.time import utcnow
 from .errors import FieldErrors, ServiceError
@@ -76,25 +76,86 @@ def user_detail(user: User) -> dict:
     }
 
 
-def set_status(admin: User, target: User, status: str) -> None:
+def set_status(admin: User, target: User, status: str, days: int | None = None) -> None:
+    """active / suspended / banned. `days` makes a suspension or ban end by itself (1-3650); empty = until changed."""
     if status not in STATUSES:
         raise ServiceError("admin.bad_status")
     if target.id == admin.id:
         raise ServiceError("admin.not_self")
     if target.is_admin:
         raise ServiceError("admin.not_admin")
-    if target.status == status:
+    if days is not None and not 1 <= days <= 3650:
+        raise ServiceError("admin.bad_days")
+    until = utcnow() + timedelta(days=days) if (days and status != "active") else None
+    if target.status == status and target.status_until == until:
         return
     old = target.status
     target.status = status
-    audit(admin, "user.status", "user", target.id, {"from": old, "to": status})
+    target.status_until = until
+    audit(admin, "user.status", "user", target.id,
+          {"from": old, "to": status, "until": until.isoformat() if until else None})
     if status == "active":
         add_notification(target.id, "account_restored", {}, None, f"restored:{target.id}:{utcnow().timestamp()}")
     db.session.commit()
 
 
+def release_if_expired(user: User) -> bool:
+    """A timed suspension/ban that has run out turns the account active again (checked at sign-in and on each request)."""
+    if user.status != "active" and user.status_until is not None and user.status_until <= utcnow():
+        user.status, user.status_until = "active", None
+        db.session.add(AdminAuditLog(admin_id=None, action="user.status_expired", target_type="user",
+                                     target_id=user.id, details={"to": "active"}))
+        db.session.commit()
+        return True
+    return False
+
+
+def user_devices(user: User) -> list:
+    return (PushSubscription.query.filter_by(user_id=user.id)
+            .order_by(PushSubscription.id.desc()).limit(20).all())
+
+
+def revoke_push(admin: User, target: User, sub_id: int) -> None:
+    """Remove one registered device of THIS user (the device must belong to the user in the URL)."""
+    sub = db.session.get(PushSubscription, sub_id)
+    if sub is None or sub.user_id != target.id:
+        raise ServiceError("admin.not_found")
+    db.session.delete(sub)                         # its delivery records go with it (ON DELETE CASCADE)
+    audit(admin, "push.revoke", "user", target.id, {"subscription_id": sub_id})
+    db.session.commit()
+
+
+# ------------------------------------------------------------------ push & notification numbers (global counts only)
+_PS_CACHE: dict = {"at": None, "v": None}
+
+
+def push_stats() -> dict:
+    """Totals for the dashboard. Kept for 60 seconds so opening the dashboard repeatedly costs nothing.
+    Only whole-site counts, never anything about one person, so sharing the cache is safe."""
+    now = utcnow()
+    if (not current_app.testing and _PS_CACHE["v"] is not None
+            and (now - _PS_CACHE["at"]).total_seconds() < 60):
+        return _PS_CACHE["v"]
+    hour_ago = now - timedelta(hours=1)
+    v = {
+        "notices_total": Notification.query.count(),
+        "notices_unread": Notification.query.filter(Notification.is_read.is_(False)).count(),
+        "push_active": PushSubscription.query.filter_by(status="active").count(),
+        "push_accepted": PushDelivery.query.filter_by(status="accepted").count(),
+        "push_acked": PushDelivery.query.filter(PushDelivery.acked_at.isnot(None)).count(),
+        "push_failed": PushDelivery.query.filter(PushDelivery.status.in_(("failed", "expired"))).count(),
+        "push_unacked": PushDelivery.query.filter(PushDelivery.status == "accepted", PushDelivery.acked_at.is_(None),
+                                                  PushDelivery.updated_at < hour_ago).count(),
+    }
+    _PS_CACHE.update(at=now, v=v)
+    return v
+
+
 # ------------------------------------------------------------------ announcements
 def create_announcement(admin: User, form) -> Announcement:
+    from . import settings_service
+    if not settings_service.enabled("announcements_enabled"):
+        raise ServiceError("site.announcements_closed")
     title = (form.get("title") or "").strip()
     body = (form.get("body") or "").strip()
     title_bn = (form.get("title_bn") or "").strip() or None
@@ -152,6 +213,49 @@ def toggle_announcement(admin: User, announcement_id: int) -> Announcement:
     audit(admin, "announcement.toggle", "announcement", ann.id, {"active": ann.is_active})
     db.session.commit()
     return ann
+
+
+def _ann_fields(form) -> dict:
+    data = {"title": (form.get("title") or "").strip(), "body": (form.get("body") or "").strip(),
+            "title_bn": (form.get("title_bn") or "").strip() or None,
+            "body_bn": (form.get("body_bn") or "").strip() or None}
+    errors = {}
+    if not 3 <= len(data["title"]) <= 150:
+        errors["title"] = ("err.ann_title", {})
+    if not 3 <= len(data["body"]) <= 3000:
+        errors["body"] = ("err.ann_body", {})
+    if data["title_bn"] and len(data["title_bn"]) > 150:
+        errors["title_bn"] = ("err.ann_title", {})
+    if data["body_bn"] and len(data["body_bn"]) > 3000:
+        errors["body_bn"] = ("err.ann_body", {})
+    if errors:
+        raise FieldErrors(errors)
+    return data
+
+
+def update_announcement(admin: User, announcement_id: int, form) -> Announcement:
+    """Fixes the text people see when they open it. It does not send anything again."""
+    ann = db.session.get(Announcement, announcement_id)
+    if ann is None:
+        raise ServiceError("admin.not_found")
+    for key, value in _ann_fields(form).items():
+        setattr(ann, key, value)
+    audit(admin, "announcement.update", "announcement", ann.id)
+    db.session.commit()
+    return ann
+
+
+def delete_announcement(admin: User, announcement_id: int) -> None:
+    """Removes the announcement and every user's notice that points to it."""
+    ann = db.session.get(Announcement, announcement_id)
+    if ann is None:
+        raise ServiceError("admin.not_found")
+    removed = (Notification.query.filter(Notification.type == "announcement",
+                                         Notification.dedupe_key == f"announcement:{ann.id}")
+               .delete(synchronize_session=False))
+    db.session.delete(ann)
+    audit(admin, "announcement.delete", "announcement", announcement_id, {"notices_removed": removed})
+    db.session.commit()
 
 
 # ------------------------------------------------------------------ reports

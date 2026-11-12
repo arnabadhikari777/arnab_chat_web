@@ -6,6 +6,38 @@ from .services import cloudinary_service
 
 
 def register_cli(app) -> None:
+    @app.cli.command("restore-db")
+    @click.argument("backup", type=click.Path(exists=True, dir_okay=False))
+    def restore_db(backup):
+        """Replace the live database with a backup file (a safety copy of the current one is made first)."""
+        import sqlite3
+        from pathlib import Path
+
+        from .extensions import db
+        from .services import db_admin_service as dbs
+
+        if not dbs.supported():
+            raise click.ClickException("Only a SQLite database file can be restored with this command.")
+        check = dbs.verify_file(Path(backup))
+        if not check["ok"]:
+            raise click.ClickException(f"That backup is damaged ({check['integrity']}). Nothing was changed.")
+        click.echo(f"Backup is healthy and has {check['users']} users.")
+        click.echo("This REPLACES the current database. Everything written after the backup will be lost.")
+        if click.prompt("Type RESTORE (capital letters) to continue") != "RESTORE":
+            raise click.ClickException("Cancelled. Nothing was changed.")
+        safety = dbs.create_backup("-pre-restore")
+        click.echo(f"Safety copy of the current database: instance/backups/{safety}")
+        db.session.remove()
+        db.engine.dispose()
+        src = sqlite3.connect(f"file:{backup}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(dbs._db_file()))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+        click.echo("Done. Now press the green Reload button on the PythonAnywhere Web tab.")
+
     @app.cli.command("check-services")
     def check_services():
         """Test the Gmail login and the Cloudinary keys without sending anything."""

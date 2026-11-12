@@ -9,7 +9,7 @@ from flask_login import current_user, login_user, logout_user
 from ...extensions import limiter
 from ...i18n import get_language
 from ...middleware.guards import safe_next
-from ...services import auth_service, otp_service
+from ...services import auth_service, otp_service, security_service
 from ...services.errors import (
     EmailDeliveryError,
     FieldErrors,
@@ -43,6 +43,7 @@ def _start_session(user, next_url: str | None = None):
     _rotate_session()
     session.permanent = True
     login_user(user)
+    security_service.record("login", user.id)
     return redirect(safe_next(next_url, url_for("main.home")))
 
 
@@ -168,8 +169,12 @@ def login():
             return redirect(url_for("auth.verify_email"))
         except ServiceError as exc:
             error = (exc.key, exc.values)
+            security_service.record("login_failed", None, identifier.strip().lower())
         else:
-            return _start_session(user, next_url)
+            from ...services import settings_service
+            if settings_service.enabled("login_open") or user.is_admin:   # admins can always sign in
+                return _start_session(user, next_url)
+            error = ("site.login_closed", {})
     return render_template("auth/login.html", error=error, identifier=identifier, next_url=next_url or "")
 
 
@@ -297,5 +302,6 @@ def sso_login():
     _rotate_session()
     session.permanent = True
     login_user(user)
+    security_service.record("login", user.id, "sso")
     return redirect(url_for("main.home"))
 

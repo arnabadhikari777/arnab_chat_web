@@ -1,0 +1,19 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import err, csrf with context %}
+{% block content %}
+<form method="post" class="stack" novalidate>
+  {{ csrf() }}
+  <h3>{{ t('admin.ann.edit') }}</h3>
+  <p class="field__hint">{{ t('admin.ann.edit_hint') }}</p>
+  <div class="field"><label class="field__label" for="title">{{ t('admin.ann.title') }} (English)</label>
+    <input class="input" id="title" name="title" maxlength="150" value="{{ form.get('title', '') }}" required>{{ err(errors, 'title') }}</div>
+  <div class="field"><label class="field__label" for="body">{{ t('admin.ann.body') }} (English)</label>
+    <textarea class="input input--area" id="body" name="body" rows="4" maxlength="3000" required>{{ form.get('body', '') }}</textarea>{{ err(errors, 'body') }}</div>
+  <div class="field"><label class="field__label" for="title_bn">{{ t('admin.ann.title') }} (বাংলা)</label>
+    <input class="input" id="title_bn" name="title_bn" maxlength="150" value="{{ form.get('title_bn') or '' }}">{{ err(errors, 'title_bn') }}</div>
+  <div class="field"><label class="field__label" for="body_bn">{{ t('admin.ann.body') }} (বাংলা)</label>
+    <textarea class="input input--area" id="body_bn" name="body_bn" rows="4" maxlength="3000">{{ form.get('body_bn') or '' }}</textarea>{{ err(errors, 'body_bn') }}</div>
+  <button class="btn btn--block" type="submit" data-busy-on-submit>{{ t('common.save') }}</button>
+  <a class="btn btn--secondary btn--block" href="{{ url_for('admin.announcements') }}">{{ t('common.back') }}</a>
+</form>
+{% endblock %}

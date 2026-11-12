@@ -10,7 +10,13 @@ from app.extensions import db
 from app.models import Message, Notification, PushDelivery, PushSubscription, User
 from app.services import push_service
 from app.utils.time import utcnow
-from tests.test_push import configured, duo, say, sent, sub_json, subscribe  # noqa: F401  (fixtures + helpers)
+from tests.test_push import configured, duo, say, sent, sub_json  # noqa: F401  (fixtures + helpers)
+
+
+def subscribe(duo, who="b", n=1):
+    """Register device number n for alice (who='a') or bob (who='b', the recipient)."""
+    res = getattr(duo, who).post("/api/push/subscribe", json=sub_json(n))
+    assert res.status_code == 200, res.get_data(as_text=True)
 
 
 def ack(app, body):
@@ -144,9 +150,9 @@ def test_ack_never_moves_a_seen_message_backwards(app, duo, configured, sent):
 
 
 def test_ack_works_without_cookies_and_needs_no_csrf(app, duo, configured, sent):
-    app.config["WTF_CSRF_ENABLED"] = True
     subscribe(duo)
     say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    app.config["WTF_CSRF_ENABLED"] = True              # from here on a normal POST would need a CSRF token
     assert app.test_client().post("/api/push/ack", json=good(sent)).status_code == 200
 
 

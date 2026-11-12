@@ -28,6 +28,7 @@ class User(UserMixin, db.Model):
     is_public = db.Column(db.Boolean, nullable=False, default=True)
     is_email_verified = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String(20), nullable=False, default="active")  # active|suspended|banned
+    status_until = db.Column(db.DateTime)   # a timed suspension/ban ends here (NULL = until an admin changes it)
     role = db.Column(db.String(20), nullable=False, default="user")  # user|admin
     language = db.Column(db.String(5), nullable=False, default="en")
     # Notification settings. Important account/security notices are always sent.

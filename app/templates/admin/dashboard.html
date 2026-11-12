@@ -1,6 +1,7 @@
 {% extends "admin/layout.html" %}
 {% block content %}
 <h2>{{ t('admin.nav.dashboard') }}</h2>
+{% if site.maintenance_mode %}<p class="banner banner--error" role="status">{{ t('admin.settings.maintenance_on') }} <a href="{{ url_for('admin.settings') }}">{{ t('admin.nav.settings') }}</a></p>{% endif %}
 <div class="stats">
   {% for key, value in [
     ('users_total', s.users_total), ('users_verified', s.users_verified), ('online_now', s.online_now),
@@ -9,6 +10,12 @@
     ('users_suspended', s.users_suspended), ('users_banned', s.users_banned),
     ('conversations', s.conversations), ('messages_total', s.messages_total), ('messages_day', s.messages_day),
     ('requests_pending', s.requests_pending), ('reports_open', s.reports_open), ('announcements_active', s.announcements_active)] %}
+    <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
+  {% endfor %}
+</div>
+<h3>{{ t('admin.nav.security') }}</h3>
+<div class="stats">
+  {% for key, value in [('notices_total', ps.notices_total), ('notices_unread', ps.notices_unread), ('push_active', ps.push_active), ('push_acked', ps.push_acked), ('push_failed', ps.push_failed), ('push_unacked', ps.push_unacked)] %}
     <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.stat.' ~ key) }}</span></div>
   {% endfor %}
 </div>

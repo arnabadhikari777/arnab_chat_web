@@ -47,6 +47,9 @@ def create_app(config_name: str | None = None) -> Flask:
         if not raw_id.isdigit() or not fingerprint:
             return None
         user = db.session.get(models.User, int(raw_id))
+        if user is not None and user.status != "active" and user.status_until is not None:
+            from .services import admin_service
+            admin_service.release_if_expired(user)        # a timed suspension that ran out
         if (user and user.is_active and user.is_email_verified
                 and hmac.compare_digest(user.session_fingerprint(), fingerprint)):
             return user
@@ -56,6 +59,9 @@ def create_app(config_name: str | None = None) -> Flask:
     from .middleware.guards import register_guards
 
     register_guards(app)
+    from .middleware.site_gate import register_site_gate
+
+    register_site_gate(app)
     register_cli(app)
     init_i18n(app)
     register_error_handlers(app)

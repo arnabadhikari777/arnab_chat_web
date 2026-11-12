@@ -27,7 +27,21 @@
     <select class="input" id="status" name="status">
       {% for st in ['active','suspended','banned'] %}<option value="{{ st }}" {% if target.status == st %}selected{% endif %}>{{ t('admin.status.' ~ st) }}</option>{% endfor %}
     </select>
+    <label class="field__label" for="days">{{ t('admin.user.days') }}</label>
+    <input class="input" id="days" name="days" type="number" min="1" max="3650" placeholder="{{ t('admin.user.days_ph') }}">
+    <p class="field__hint">{{ t('admin.user.days_hint') }}</p>
     <button class="btn btn--block" type="submit">{{ t('common.save') }}</button>
   </form>
 {% endif %}
+{% if target.status_until %}<p class="muted">{{ t('admin.user.until') }} {{ target.status_until.strftime('%Y-%m-%d %H:%M') }} UTC</p>{% endif %}
+<h3>{{ t('admin.user.devices') }}</h3>
+{% for dv in devices %}
+  <article class="card stack stack--tight">
+    <strong>{{ dv.status }}</strong>
+    <span class="muted">{{ (dv.user_agent or '-')[:80] }}</span>
+    <span class="muted">{{ t('admin.user.last_ok') }} {{ dv.last_success_at.strftime('%Y-%m-%d %H:%M') ~ ' UTC' if dv.last_success_at else '-' }}</span>
+    <form method="post" action="{{ url_for('admin.user_push_revoke', user_id=target.id, sub_id=dv.id) }}" onsubmit="return confirm('{{ t('admin.user.revoke_confirm') }}')">{{ csrf() }}
+      <button class="btn btn--ghost" type="submit">{{ t('admin.user.revoke') }}</button></form>
+  </article>
+{% else %}<p class="muted">{{ t('admin.user.no_devices') }}</p>{% endfor %}
 {% endblock %}

@@ -22,6 +22,9 @@
     <p class="muted">{{ a.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ t('admin.ann.active') if a.is_active else t('admin.ann.inactive') }}</p>
     <form method="post" action="{{ url_for('admin.announcement_toggle', announcement_id=a.id) }}">{{ csrf() }}
       <button class="btn btn--secondary" type="submit">{{ t('admin.ann.deactivate') if a.is_active else t('admin.ann.activate') }}</button></form>
+    <a class="btn btn--secondary" href="{{ url_for('admin.announcement_edit', announcement_id=a.id) }}">{{ t('admin.ann.edit') }}</a>
+    <form method="post" action="{{ url_for('admin.announcement_delete', announcement_id=a.id) }}" onsubmit="return confirm('{{ t('admin.ann.delete_confirm') }}')">{{ csrf() }}
+      <button class="btn btn--ghost" type="submit">{{ t('admin.ann.delete') }}</button></form>
   </article>
 {% else %}<p class="muted center">{{ t('admin.ann.none') }}</p>{% endfor %}
 {% endblock %}

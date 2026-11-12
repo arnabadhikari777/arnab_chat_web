@@ -61,3 +61,7 @@ Other docs: `docs/ARCHITECTURE.md`, `docs/REQUIREMENTS_CHECKLIST.md` (honest sta
 flask db migrate -m "describe the change" && flask db upgrade
 ```
 Set `DATABASE_URL` in `.env` to move to PostgreSQL.
+
+
+## Testing and deployment (Bengali, step by step)
+See `DEPLOYMENT_GUIDE.md` (local run, tests, PythonAnywhere update and fresh install, phone push test, admin panel, backup/restore). What changed and what was or was not tested: `IMPLEMENTATION_REPORT.md`.

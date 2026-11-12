@@ -47,14 +47,20 @@ def vapid_status() -> vapid.VapidStatus:
                      cfg.get("VAPID_CONTACT") or "")
 
 
+def push_switched_on() -> bool:
+    """The admin's website-wide push switch (Admin Panel > Settings). On by default."""
+    from . import settings_service
+    return settings_service.enabled("push_enabled")
+
+
 def vapid_configured() -> bool:
-    return vapid_status().configured
+    return vapid_status().configured and push_switched_on()
 
 
 def public_vapid_key() -> str | None:
     """The public key, only when the WHOLE push setup is valid. The private key never leaves the server."""
     st = vapid_status()
-    return st.public if st.configured else None
+    return st.public if st.configured and push_switched_on() else None
 
 
 # ------------------------------------------------------------------ subscriptions
@@ -368,8 +374,7 @@ def sync_pending_for_user(user_id: int, limit: int = 10) -> dict:
     at most MAX_ATTEMPTS tries each, only while the push is still young (PUSH_TTL_SECONDS), only `limit` per call.
     It never creates pushes for notices that were not attempted before, so opening the app cannot cause a flood.
     """
-    st = vapid_status()
-    if not st.configured:
+    if not vapid_configured():                       # keys missing OR the admin switched push off
         return {"attempted": 0, "accepted": 0, "configured": False}
     subs = {s.id: s for s in list_active_subscriptions(user_id)}
     user = db.session.get(User, user_id)

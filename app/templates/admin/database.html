@@ -1,0 +1,48 @@
+{% extends "admin/layout.html" %}
+{% from "partials/macros.html" import csrf with context %}
+{% block content %}
+<h2>{{ t('admin.nav.database') }}</h2>
+{% if not info.supported %}<p class="banner banner--error">{{ t('admin.db.unsupported') }}</p>{% endif %}
+<div class="stats">
+  {% for key, value in [('users', info.users), ('messages', info.messages), ('conversations', info.conversations),
+     ('notices', info.notices), ('push_devices', info.push_devices), ('push_deliveries', info.push_deliveries),
+     ('size_mb', info.size_mb if info.size_mb is not none else '-'), ('health', info.health)] %}
+    <div class="stat"><span class="stat__value">{{ value }}</span><span class="stat__label">{{ t('admin.db.' ~ key) }}</span></div>
+  {% endfor %}
+</div>
+
+<details class="card" open>
+  <summary><strong>{{ t('admin.db.backups') }}</strong></summary>
+  <p class="muted">{{ t('admin.db.backup_warning') }}</p>
+  {% if verified %}
+    <p class="banner banner--{{ 'success' if verified.ok else 'error' }}" role="status">{{ verified.name }}: {{ t('admin.db.verify_ok' if verified.ok else 'admin.db.verify_bad', users=verified.users, detail=verified.integrity) }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin.database_backup') }}">{{ csrf() }}
+    <button class="btn btn--block" type="submit" data-busy-on-submit {% if not info.supported %}disabled{% endif %}>{{ t('admin.db.make_backup') }}</button></form>
+  {% for b in backups %}
+    <article class="card stack stack--tight">
+      <strong>{{ b.name }}</strong><span class="muted">{{ b.size_mb }} MB</span>
+      <a class="btn btn--secondary" href="{{ url_for('admin.database_download', name=b.name) }}">{{ t('admin.db.download') }}</a>
+      <form method="post" action="{{ url_for('admin.database_verify', name=b.name) }}">{{ csrf() }}<button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.verify') }}</button></form>
+      <form method="post" action="{{ url_for('admin.database_delete', name=b.name) }}" onsubmit="return confirm('{{ t('admin.db.delete_confirm') }}')">{{ csrf() }}<button class="btn btn--ghost" type="submit">{{ t('admin.db.delete') }}</button></form>
+    </article>
+  {% else %}<p class="muted center">{{ t('admin.db.no_backups') }}</p>{% endfor %}
+  <p class="field__hint">{{ t('admin.db.restore_note') }}</p>
+</details>
+
+<details class="card">
+  <summary><strong>{{ t('admin.db.cleanup') }}</strong></summary>
+  <p class="muted">{{ t('admin.db.cleanup_hint') }}</p>
+  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" onsubmit="return confirm('{{ t('admin.db.cleanup_confirm') }}')">{{ csrf() }}
+    <input type="hidden" name="kind" value="notices">
+    <label class="field__label" for="d1">{{ t('admin.db.older_than') }}</label>
+    <input class="input" id="d1" name="days" type="number" min="30" max="3650" value="90" required>
+    <button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.cleanup_notices') }}</button>
+  </form>
+  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" onsubmit="return confirm('{{ t('admin.db.cleanup_confirm') }}')">{{ csrf() }}
+    <input type="hidden" name="kind" value="events">
+    <input class="input" name="days" type="number" min="30" max="3650" value="90" required aria-label="{{ t('admin.db.older_than') }}">
+    <button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.cleanup_events') }}</button>
+  </form>
+</details>
+{% endblock %}

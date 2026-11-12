@@ -201,7 +201,8 @@ def push_config():
     Normal people only learn "not configured". Admins also see which .env variables to fix."""
     from ...services import push_service
     st = push_service.vapid_status()
-    body = {"ok": True, "configured": st.configured, "publicKey": st.public if st.configured else None}
+    live = st.configured and push_service.push_switched_on()
+    body = {"ok": True, "configured": live, "publicKey": st.public if live else None}
     if not st.configured and current_user.is_admin:
         body["missing"] = st.missing
         body["problems"] = st.problems

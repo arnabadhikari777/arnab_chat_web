@@ -72,3 +72,29 @@ class AdminAuditLog(db.Model):
     target_id = db.Column(db.Integer)
     details = db.Column(db.JSON)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+class SiteSetting(db.Model):
+    """One website-wide switch or text, edited only from the Admin Panel. Unknown keys are ignored on read."""
+
+    __tablename__ = "site_settings"
+
+    key = db.Column(db.String(60), primary_key=True)
+    value = db.Column(db.String(500), nullable=False, default="")
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class SecurityEvent(db.Model):
+    """Sign-in activity for the Security page. Never holds passwords, codes or tokens."""
+
+    __tablename__ = "security_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(30), nullable=False)       # login | login_failed
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    ip = db.Column(db.String(45))
+    detail = db.Column(db.String(120))                    # e.g. the username that was typed (max 60) or "sso"
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (db.Index("ix_security_kind_id", "kind", "id"),)
