@@ -1,7 +1,8 @@
 """Database health, backups and safe clean-up for the Admin Panel (SQLite only).
 
 No arbitrary SQL is ever run and nothing here deletes user accounts or messages. Restoring is deliberately NOT
-a web action (replacing the live database from a web request is unsafe): use `flask restore-db`.
+a web action (replacing the live database from a web request is unsafe): use `python tools/db_restore.py`
+(see deployment/03-database-backup-and-migration.md).
 """
 import os
 import re
@@ -119,3 +120,12 @@ def cleanup_read_notices(days: int) -> int:
          .delete(synchronize_session=False))
     db.session.commit()
     return n
+
+
+def cleanup_security_events(days: int) -> int:
+    """Delete only sign-in / security log lines older than `days` (30 or more). No account data is touched."""
+    from .security_service import prune
+
+    if not 30 <= days <= 3650:
+        raise ServiceError("admin.db.bad_days")
+    return prune(days)

@@ -18,24 +18,24 @@ _CHAT_EXEMPT = {
 
 
 def _rules(ep: str, method: str) -> list[tuple[str, str]]:
+    """(setting, message key) pairs; every setting listed must be ON for the request to pass.
+
+    chat_enabled      = the chat area exists at all (full shutdown). Off blocks reading AND sending.
+    messaging_enabled = new messages. Off blocks only sending; history, polling and read receipts keep working.
+    """
     out = []
     if ep not in _CHAT_EXEMPT and (ep.startswith("chat.") or ep == "people.message"):
-        out.append(("messaging_enabled", "site.chat_closed"))
         out.append(("chat_enabled", "site.chat_closed"))
     if ep == "chat.send" and method == "POST":
-        out.append(("sending_enabled", "site.sending_closed"))
         out.append(("messaging_enabled", "site.sending_closed"))
     if ep in ("people.send_request", "people.accept"):
         out.append(("requests_enabled", "site.requests_closed"))
-        out.append(("message_requests_enabled", "site.requests_closed"))
     if ep == "notices.announcement":
         out.append(("announcements_enabled", "site.announcements_closed"))
     if ep == "auth.register":
         out.append(("registration_enabled", "site.registration_closed"))
-        out.append(("registration_open", "site.registration_closed"))
     if ep in ("auth.login", "auth.sso_login"):
         out.append(("login_enabled", "site.login_closed"))
-        out.append(("login_open", "site.login_closed"))
     return out
 
 

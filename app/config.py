@@ -43,6 +43,19 @@ def _default_db_url() -> str:
     return "sqlite:///" + str(BASE_DIR / "instance" / "chat.db")
 
 
+def _absolute_sqlite_url(url: str) -> str:
+    """A relative sqlite path ("sqlite:///instance/chat.db") is resolved against the working directory, which
+    is NOT the project folder on PythonAnywhere: the app would quietly open a brand-new EMPTY database.
+    Resolve it against the project folder instead. In-memory and absolute paths are left alone."""
+    prefix = "sqlite:///"
+    if not url.startswith(prefix):
+        return url
+    raw, sep, query = url[len(prefix):].partition("?")
+    if not raw or raw == ":memory:" or raw.startswith("/") or (len(raw) > 1 and raw[1] == ":"):
+        return url
+    return prefix + str((BASE_DIR / raw).resolve()) + (sep + query if sep else "")
+
+
 class Config:
     # ---- app ----
     APP_NAME = env_str("APP_NAME", "Goppo")
@@ -53,7 +66,7 @@ class Config:
     SUPPORTED_LANGUAGES = env_list("SUPPORTED_LANGUAGES", "en,bn")
 
     # ---- database ----
-    SQLALCHEMY_DATABASE_URI = env_str("DATABASE_URL", _default_db_url())
+    SQLALCHEMY_DATABASE_URI = _absolute_sqlite_url(env_str("DATABASE_URL", _default_db_url()))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # ---- sessions & cookies ----
@@ -161,6 +174,10 @@ class Config:
     # gets the push late and still has to be able to confirm it).
     PUSH_ACK_MAX_AGE_SECONDS = env_int("PUSH_ACK_MAX_AGE_SECONDS", 90000)
     PUSH_MAX_DEVICES_PER_USER = env_int("PUSH_MAX_DEVICES_PER_USER", 5)
+    # SSRF guard (services/push_endpoint.py): only known push-service hosts are accepted. Add more hosts here
+    # (comma separated, no scheme) ONLY if a browser's push service is rejected; never put your own domain.
+    PUSH_ENDPOINT_EXTRA_HOSTS = env_list("PUSH_ENDPOINT_EXTRA_HOSTS", "")
+    PUSH_ENDPOINT_CHECK_DNS = env_bool("PUSH_ENDPOINT_CHECK_DNS", True)
     PUSH_ANNOUNCEMENT_INLINE_LIMIT = env_int("PUSH_ANNOUNCEMENT_INLINE_LIMIT", 40)
 
     # ---- Math Class SSO ----
@@ -187,6 +204,7 @@ class TestingConfig(Config):
     RATELIMIT_ENABLED = False
     ADMIN_EMAILS = frozenset({"boss@example.com"})
     PASSWORD_HASH_METHOD = "pbkdf2:sha256:1000"  # fast hashing keeps the tests quick
+    PUSH_ENDPOINT_CHECK_DNS = False              # tests have no network; test_push_endpoint.py checks the DNS rules itself
 
 
 _CONFIGS = {

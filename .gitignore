@@ -3,20 +3,18 @@
 *.pem
 *.key
 .secret_key
-.venv
-.git
-chat.db
-docs
-.md
 
 # ============ Live data (stays on the server) ============
-database.db
-.db
-.sqlite
-.sqlite3
+instance/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 backups/
+logs/
 uploads/notes/*
-
 
 # ============ Python ============
 __pycache__/
@@ -36,6 +34,7 @@ dist/
 .ruff_cache/
 .coverage
 htmlcov/
+node_modules/
 
 # ============ Editors / OS ============
 .idea/
@@ -46,7 +45,7 @@ htmlcov/
 Thumbs.db
 desktop.ini
 
-# ============ Logs / temp / leftovers ============
+# ============ Temp / leftovers ============
 *.log
 *.tmp
 *.bak
@@ -55,4 +54,3 @@ desktop.ini
 
 # test fixture (schema only, zero rows) must be committed
 !tests/fixtures/*.db
-chat.db

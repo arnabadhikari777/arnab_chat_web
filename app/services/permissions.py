@@ -24,7 +24,8 @@ ENDPOINT_PERMS = {
     "admin.announcements": "announcements.manage", "admin.announcement_edit": "announcements.manage",
     "admin.announcement_delete": "announcements.manage", "admin.announcement_toggle": "announcements.manage",
     "admin.settings": "settings.manage",
-    "admin.audit": "audit.view",
+    "admin.audit": "audit.view", "admin.security": "audit.view",
+    "admin.user_push_revoke": "users.moderate",
     "admin.staff": "staff.manage",
 }
 

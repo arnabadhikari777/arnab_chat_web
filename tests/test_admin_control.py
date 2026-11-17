@@ -24,7 +24,8 @@ def world(app):
 
 
 def save_settings(browser, **over):
-    form = {k: "1" for k, d in site_settings.SWITCHES.items() if d}      # everything at its default ...
+    # everything at its default ... and ONLY canonical names, exactly like the real form (legacy aliases are not posted)
+    form = {k: "1" for k, d in site_settings.SWITCHES.items() if d and k not in site_settings._ALIASES}
     form.update({"maintenance_message": "", "site_announcement": ""})
     for k, v in over.items():
         if v in (False, None):
@@ -79,13 +80,27 @@ def test_settings_page_shows_current_values(app, world):
 
 
 # ================================================================ each switch really works
-def test_messaging_off_blocks_text_but_not_after_switching_back(app, world):
+def test_messaging_off_blocks_new_messages_but_old_ones_stay_readable(app, world):
+    assert send(world.a, world).status_code == 201                      # one message exists before the switch
     save_settings(world.admin, messaging_enabled=False)
-    res = send(world.a, world)
-    assert res.status_code == 400 and res.get_json()["error"]["code"] == "site.messaging_off"
-    assert Message.query.count() == 0
+    res = send(world.a, world, uuid="uuid-0002-aaaa")
+    assert res.status_code == 503 and res.get_json()["error"]["code"] == "site.sending_closed"
+    assert Message.query.count() == 1                                    # nothing new was stored
+    # reading, polling and read receipts are NOT part of "new messages"
+    assert world.b.get(f"/api/conversations/{world.conv}/messages").status_code == 200
+    assert world.b.get(f"/api/conversations/{world.conv}/poll").status_code == 200
+    assert world.b.get(f"/chat/{world.conv}").status_code == 200
+    assert world.b.post(f"/api/conversations/{world.conv}/seen", json={}).status_code == 200
+    assert Message.query.count() == 1                                    # and the old message did not disappear
     save_settings(world.admin)
-    assert send(world.a, world).status_code == 201
+    assert send(world.a, world, uuid="uuid-0003-aaaa").status_code == 201
+
+
+def test_chat_off_is_a_separate_full_shutdown(app, world):
+    save_settings(world.admin, chat_enabled=False)
+    assert world.b.get(f"/api/conversations/{world.conv}/messages").status_code == 503
+    assert world.admin.get(f"/api/conversations/{world.conv}/messages").status_code == 200   # admins are never locked out
+    assert site_settings.enabled("messaging_enabled")                                         # the other switch is untouched
 
 
 def test_uploads_off_and_voice_off_are_separate(app, world):

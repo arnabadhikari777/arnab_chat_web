@@ -341,3 +341,39 @@ def set_staff_level(admin: User, username: str, level: str) -> User:
     audit(admin, "staff.level", "user", target.id, {"from": old, "to": None if level == "none" else level})
     db.session.commit()
     return target
+
+
+# ------------------------------------------------------------------ security page and push devices
+def security_overview() -> dict:
+    """Numbers for Admin > Security (last 7 days for deliveries)."""
+    week = utcnow() - timedelta(days=7)
+    deliveries = PushDelivery.query.filter(PushDelivery.created_at > week)
+    return {
+        "push_active": PushSubscription.query.filter_by(status="active").count(),
+        "push_acked": deliveries.filter(PushDelivery.acked_at.isnot(None)).count(),
+        "push_failed": deliveries.filter(PushDelivery.status.in_(("failed", "expired"))).count(),
+        "push_unacked": deliveries.filter(PushDelivery.status == "accepted", PushDelivery.acked_at.is_(None)).count(),
+    }
+
+
+def push_problem_deliveries(limit: int = 30):
+    return (PushDelivery.query.filter(PushDelivery.status.in_(("failed", "expired")))
+            .order_by(PushDelivery.id.desc()).limit(limit).all())
+
+
+def recent_admin_actions(limit: int = 20):
+    return AdminAuditLog.query.order_by(AdminAuditLog.id.desc()).limit(limit).all()
+
+
+def devices_for(target: User):
+    return PushSubscription.query.filter_by(user_id=target.id).order_by(PushSubscription.id.desc()).all()
+
+
+def revoke_device(admin: User, target: User, subscription_id: int) -> None:
+    """Remove ONE push device, and only if it belongs to `target` (another person's id in the URL changes nothing)."""
+    sub = PushSubscription.query.filter_by(id=subscription_id, user_id=target.id).first()
+    if sub is None:
+        raise ServiceError("admin.device_not_found")
+    audit(admin, "push.revoke", "user", target.id, {"device": sub.id})
+    db.session.delete(sub)
+    db.session.commit()

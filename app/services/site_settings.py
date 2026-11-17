@@ -13,6 +13,10 @@ from ..extensions import db
 from ..models import SiteSetting
 from .errors import FieldErrors
 
+# Canonical switches (what Admin > Settings shows and what is stored):
+#   messaging_enabled  NEW messages can be sent. Off = nobody can send; old conversations stay readable.
+#   chat_enabled       the whole chat area is reachable. Off = full chat shutdown (inbox, rooms, history, polling).
+# The two are independent on purpose, so an admin can stop new messages without hiding old ones.
 SWITCHES = {
     "registration_enabled": True,
     "login_enabled": True,
@@ -35,9 +39,8 @@ SWITCHES = {
 _ALIASES = {
     "registration_open": "registration_enabled",
     "login_open": "login_enabled",
-    "chat_enabled": "messaging_enabled",
     "message_requests_enabled": "requests_enabled",
-    "sending_enabled": "messaging_enabled",
+    "sending_enabled": "messaging_enabled",   # older name of "new messages allowed"
 }
 
 TEXTS = {

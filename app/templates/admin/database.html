@@ -24,7 +24,7 @@
       <strong>{{ b.name }}</strong><span class="muted">{{ b.size_mb }} MB</span>
       <a class="btn btn--secondary" href="{{ url_for('admin.database_download', name=b.name) }}">{{ t('admin.db.download') }}</a>
       <form method="post" action="{{ url_for('admin.database_verify', name=b.name) }}">{{ csrf() }}<button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.verify') }}</button></form>
-      <form method="post" action="{{ url_for('admin.database_delete', name=b.name) }}" onsubmit="return confirm('{{ t('admin.db.delete_confirm') }}')">{{ csrf() }}<button class="btn btn--ghost" type="submit">{{ t('admin.db.delete') }}</button></form>
+      <form method="post" action="{{ url_for('admin.database_delete', name=b.name) }}" data-confirm="{{ t('admin.db.delete_confirm') }}">{{ csrf() }}<button class="btn btn--ghost" type="submit">{{ t('admin.db.delete') }}</button></form>
     </article>
   {% else %}<p class="muted center">{{ t('admin.db.no_backups') }}</p>{% endfor %}
   <p class="field__hint">{{ t('admin.db.restore_note') }}</p>
@@ -33,13 +33,13 @@
 <details class="card">
   <summary><strong>{{ t('admin.db.cleanup') }}</strong></summary>
   <p class="muted">{{ t('admin.db.cleanup_hint') }}</p>
-  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" onsubmit="return confirm('{{ t('admin.db.cleanup_confirm') }}')">{{ csrf() }}
+  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" data-confirm="{{ t('admin.db.cleanup_confirm') }}">{{ csrf() }}
     <input type="hidden" name="kind" value="notices">
     <label class="field__label" for="d1">{{ t('admin.db.older_than') }}</label>
     <input class="input" id="d1" name="days" type="number" min="30" max="3650" value="90" required>
     <button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.cleanup_notices') }}</button>
   </form>
-  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" onsubmit="return confirm('{{ t('admin.db.cleanup_confirm') }}')">{{ csrf() }}
+  <form method="post" action="{{ url_for('admin.database_cleanup') }}" class="stack" data-confirm="{{ t('admin.db.cleanup_confirm') }}">{{ csrf() }}
     <input type="hidden" name="kind" value="events">
     <input class="input" name="days" type="number" min="30" max="3650" value="90" required aria-label="{{ t('admin.db.older_than') }}">
     <button class="btn btn--secondary" type="submit" data-busy-on-submit>{{ t('admin.db.cleanup_events') }}</button>

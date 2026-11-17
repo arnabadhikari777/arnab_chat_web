@@ -1,3 +1,8 @@
+> **CORRECTION (2026-11-16 repair).** This report, written earlier, said the files `c7e1a5d3f2b8`, `d2a9b4e6f1c7` and
+> `e5b3c8a1d7f4` had been *removed* and the history made linear. **That was not true of the delivered ZIP**: all three files were
+> still present, so the project still had **two migration heads** (`f1a2b3c4d5e6` and `e5b3c8a1d7f4`). The real repair is documented in `CODE_REPAIR_REPORT.md`. The statements below are
+> kept only as history. Do not rely on them.
+
 # Goppo Chat Website – Recovery Report
 
 **Date:** 2026-11-12  

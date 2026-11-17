@@ -43,6 +43,11 @@
 </form>
 {% for n in notes %}<article class="card"><p>{{ n.note }}</p><p class="muted">{{ n.created_at.strftime('%Y-%m-%d %H:%M') }} UTC</p></article>
 {% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}
+<h3>{{ t('admin.user.devices') }}</h3>
+{% for dv in devices %}<form method="post" action="{{ url_for('admin.user_push_revoke', user_id=target.id, subscription_id=dv.id) }}" class="card stack stack--tight" data-confirm="{{ t('admin.user.device_confirm') }}">
+  {{ csrf() }}<span class="muted">{{ dv.status }} · {{ (dv.user_agent or '-')[:60] }} · {{ dv.created_at.strftime('%Y-%m-%d') }}</span>
+  <button class="btn btn--secondary" type="submit">{{ t('admin.user.device_revoke') }}</button></form>
+{% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}
 <h3>{{ t('admin.user.history') }}</h3>
 {% for e in history %}<p class="muted">{{ e.created_at.strftime('%Y-%m-%d %H:%M') }} UTC · {{ e.action }}</p>
 {% else %}<p class="muted">{{ t('admin.none_yet') }}</p>{% endfor %}

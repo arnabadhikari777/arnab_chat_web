@@ -23,7 +23,7 @@ from itsdangerous import BadData, URLSafeTimedSerializer
 from ..extensions import db
 from ..models import Conversation, Message, Notification, PushDelivery, PushSubscription, User
 from ..utils.time import utcnow
-from . import vapid
+from . import push_endpoint, vapid
 
 log = logging.getLogger(__name__)
 
@@ -62,9 +62,11 @@ def public_vapid_key() -> str | None:
 
 # ------------------------------------------------------------------ subscriptions
 def validate_subscription(endpoint: str, p256dh: str, auth: str) -> str:
-    endpoint = (endpoint or "").strip()
-    if not endpoint.startswith("https://") or len(endpoint) > MAX_ENDPOINT_LEN:
-        raise ValueError("bad_endpoint")
+    try:
+        endpoint = push_endpoint.check_endpoint(endpoint)          # SSRF guard: host allow-list + public addresses only
+    except push_endpoint.EndpointRejected as exc:
+        log.warning("push endpoint rejected (%s)", exc.code)        # the URL itself is never logged
+        raise ValueError("bad_endpoint") from None
     if not p256dh or not auth or len(p256dh) > 200 or len(auth) > 100:
         raise ValueError("bad_keys")
     return endpoint
@@ -221,114 +223,40 @@ def _send_one(sub: PushSubscription, payload: dict, group_key: str) -> tuple[str
     if not st.configured:
         return "failed", "VAPID not configured"
     try:
+        sub_endpoint = push_endpoint.check_endpoint(sub.endpoint)  # DNS can change after saving: check again now
+    except push_endpoint.EndpointRejected as exc:
+        log.warning("push send blocked, endpoint not allowed (%s)", exc.code)
+        return "expired", "endpoint not allowed"                   # never contacted; the device is dropped as dead
+    try:
         from pywebpush import WebPushException, webpush
     except ImportError:
         return "failed", "pywebpush not installed"
+    extra = {}
+    try:
+        import inspect
+
+        if "requests_session" in inspect.signature(webpush).parameters:
+            import requests
+
+            session = requests.Session()
+            session.max_redirects = 0                              # a push service never needs to redirect a POST
+            extra["requests_session"] = session
+    except (TypeError, ValueError, ImportError):
+        pass
     try:
         webpush(
-            subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
+            subscription_info={"endpoint": sub_endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
             data=json.dumps(payload),
             vapid_private_key=st.private_raw,
             vapid_claims={"sub": st.contact},                 # fresh dict: the library edits it
             ttl=int(current_app.config.get("PUSH_TTL_SECONDS", 86400)),
             timeout=int(current_app.config.get("PUSH_SEND_TIMEOUT_SECONDS", 6)),
             headers={"Topic": _topic(group_key)},
+            **extra,
         )
         return "accepted", None
     except WebPushException as exc:
         code = getattr(getattr(exc, "response", None), "status_code", None)
         return ("expired" if code in GONE_STATUSES else "failed"), str(exc)[:300]
-    except Exception as exc:  # noqa: BLE001
-        return "failed", f"{exc.__class__.__name__}: {exc}"[:300]
-
-
-def _record(note: Notification, sub: PushSubscription, group_key: str, row: PushDelivery | None,
-            result: str, error: str | None, restart: bool = False) -> None:
-    now = utcnow()
-    if row is None:
-        row = PushDelivery(notification_id=note.id, subscription_id=sub.id, user_id=note.user_id,
-                           group_key=group_key, status=result, attempt_count=1, last_error=error,
-                           accepted_at=now if result == "accepted" else None)
-        db.session.add(row)
-    else:
-        row.status, row.last_error, row.updated_at = result, error, now
-        row.attempt_count = 1 if restart else (row.attempt_count or 0) + 1
-        row.accepted_at = now if result == "accepted" else row.accepted_at
-    sub.last_attempt_at = now
-    if result == "accepted":
-        sub.last_success_at, sub.failure_count, sub.status = now, 0, "active"
-    elif result == "expired":
-        sub.status = "expired"
-    else:
-        sub.failure_count = (sub.failure_count or 0) + 1
-        if sub.failure_count >= MAX_ATTEMPTS:
-            sub.status = "failed"      # the app re-activates it the next time this browser re-registers
-
-
-def enqueue_and_send(note: Notification, force: bool = False) -> int:
-    """Send this notification to the person's devices. Returns how many devices accepted it.
-
-    force=True means "this notice just got NEW activity" (another message in the same chat), so a
-    delivery that was accepted earlier must be sent again with the new count.
-    """
-    if not vapid_configured() or not _push_switch_on():
-        return 0
-    user = db.session.get(User, note.user_id)
-    if user is None or not _wanted(user, note):
-        return 0
-    subs = list_active_subscriptions(note.user_id)
-    if not subs:
-        return 0
-    group_key = note.dedupe_key or f"n:{note.id}"
-    rows = {d.subscription_id: d for d in PushDelivery.query.filter_by(notification_id=note.id).all()}
-    accepted = 0
-    for sub in subs:
-        row = rows.get(sub.id)
-        if row is not None and row.status == "accepted" and not force:
-            continue
-        result, err = _send_one(sub, _build_payload(note, user, sub), group_key)
-        _record(note, sub, group_key, row, result, err, restart=force)
-        accepted += result == "accepted"
-    db.session.commit()
-    return accepted
-
-
-def sync_pending_for_user(user_id: int, limit: int = 10) -> dict:
-    """Retry deliveries that FAILED earlier (network hiccup, push service busy). Bounded three ways:
-    at most MAX_ATTEMPTS tries each, only while the push is still young (PUSH_TTL_SECONDS), only `limit` per call.
-    It never creates pushes for notices that were not attempted before, so opening the app cannot cause a flood.
-    """
-    st = vapid_status()
-    if not st.configured or not _push_switch_on():
-        return {"attempted": 0, "accepted": 0, "configured": st.configured}
-    subs = {s.id: s for s in list_active_subscriptions(user_id)}
-    user = db.session.get(User, user_id)
-    if not subs or user is None:
-        return {"attempted": 0, "accepted": 0, "configured": True}
-    cutoff = utcnow() - timedelta(seconds=int(current_app.config.get("PUSH_TTL_SECONDS", 86400)))
-    rows = (PushDelivery.query.filter(
-        PushDelivery.user_id == user_id, PushDelivery.status.in_(("pending", "failed")),
-        PushDelivery.attempt_count < MAX_ATTEMPTS, PushDelivery.created_at >= cutoff,
-        PushDelivery.subscription_id.in_(list(subs))).order_by(PushDelivery.updated_at.asc()).limit(limit).all())
-    attempted = accepted = 0
-    for row in rows:
-        note = db.session.get(Notification, row.notification_id)
-        if note is None or not _wanted(user, note):
-            row.attempt_count = MAX_ATTEMPTS         # nothing to alert about any more: stop for good
-            continue
-        sub = subs[row.subscription_id]
-        result, err = _send_one(sub, _build_payload(note, user, sub), row.group_key)
-        _record(note, sub, row.group_key, row, result, err)
-        attempted += 1
-        accepted += result == "accepted"
-    db.session.commit()
-    return {"attempted": attempted, "accepted": accepted, "configured": True}
-
-
-def notify_after_commit(note: Notification, force: bool = False) -> None:
-    """Best-effort push after the notification row is committed. Never raises."""
-    try:
-        enqueue_and_send(note, force=force)
-    except Exception:  # noqa: BLE001
-        db.session.rollback()
-        log.exception("push delivery failed for notification %s", getattr(note, "id", None))
+    except Exception as exc:  # noqa: BLE001 - e.g. a blocked redirect or a network error: failed, never a crash
+        return "failed", exc.__class__.__name__

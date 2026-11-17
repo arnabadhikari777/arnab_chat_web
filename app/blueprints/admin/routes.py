@@ -1,9 +1,11 @@
-from flask import abort, flash, redirect, render_template, request, url_for
+from flask import abort, flash, redirect, render_template, request, send_file, url_for
 from flask_login import current_user
 
 from ...extensions import db
 from ...models import Report, User
 from ...services import admin_service as svc
+from ...services import db_admin_service as dbs
+from ...services import security_service
 from ...services import site_settings
 from ...services.errors import FieldErrors, ServiceError
 from . import bp
@@ -42,7 +44,19 @@ def users():
 def user(user_id):
     target = _user_or_404(user_id)
     return render_template("admin/user.html", target=target, d=svc.user_detail(target), section="users",
-                           notes=svc.notes_for(target), history=svc.history_for(target))
+                           notes=svc.notes_for(target), history=svc.history_for(target),
+                           devices=svc.devices_for(target))
+
+
+@bp.post("/users/<int:user_id>/push/<int:subscription_id>/revoke")
+def user_push_revoke(user_id, subscription_id):
+    target = _user_or_404(user_id)
+    try:
+        svc.revoke_device(current_user, target, subscription_id)
+        flash("flash.admin_saved", "success")
+    except ServiceError as exc:
+        flash([exc.key, exc.values], "error")
+    return redirect(url_for("admin.user", user_id=target.id))
 
 
 @bp.post("/users/<int:user_id>/status")
@@ -200,3 +214,102 @@ def audit():
     admins = {u.id: u for u in User.query.filter(User.id.in_([r.admin_id for r in rows if r.admin_id] or [0])).all()}
     return render_template("admin/audit.html", rows=rows, admins=admins, has_next=has_next,
                            page=_page(), section="audit")
+
+
+
+# ------------------------------------------------------------------ security page
+@bp.get("/security")
+def security():
+    failed = security_service.recent("login_failed")
+    logins = security_service.recent("login")
+    ids = {e.user_id for e in logins if e.user_id}
+    names = {u.id: u.username for u in User.query.filter(User.id.in_(ids or {0})).all()}
+    return render_template("admin/security.html", ps=svc.security_overview(), failed=failed, logins=logins,
+                           names=names, push_bad=svc.push_problem_deliveries(),
+                           recent_admin=svc.recent_admin_actions(), section="security")
+
+
+# ------------------------------------------------------------------ database tools
+# These endpoints are not listed in services/permissions.py on purpose: unlisted admin pages need
+# "staff.manage" (super admin only). A backup contains every password hash, so it is never for lower levels.
+# Restoring is NOT a web action (see deployment/03-database-backup-and-migration.md).
+def _database_page(verified=None):
+    return render_template("admin/database.html", info=dbs.info(), backups=dbs.list_backups(),
+                           verified=verified, section="database")
+
+
+@bp.get("/database")
+def database():
+    return _database_page()
+
+
+@bp.post("/database/backup")
+def database_backup():
+    try:
+        name = dbs.create_backup()
+        svc.audit(current_user, "database.backup", "database", None, {"name": name})
+        db.session.commit()
+        flash("flash.admin_saved", "success")
+    except ServiceError as exc:
+        flash([exc.key, exc.values], "error")
+    return redirect(url_for("admin.database"))
+
+
+@bp.post("/database/backups/<name>/verify")
+def database_verify(name):
+    try:
+        path = dbs.backup_path(name)
+    except ServiceError:
+        abort(404)
+    result = dbs.verify_file(path)
+    svc.audit(current_user, "database.backup_verify", "database", None, {"name": name, "ok": result["ok"]})
+    db.session.commit()
+    return _database_page({**result, "name": name})
+
+
+@bp.get("/database/backups/<name>/download")
+def database_download(name):
+    try:
+        path = dbs.backup_path(name)
+    except ServiceError:
+        abort(404)
+    svc.audit(current_user, "database.backup_download", "database", None, {"name": name})
+    db.session.commit()
+    res = send_file(path, as_attachment=True, download_name=name, mimetype="application/octet-stream")
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@bp.post("/database/backups/<name>/delete")
+def database_delete(name):
+    try:
+        dbs.delete_backup(name)
+    except ServiceError:
+        abort(404)
+    svc.audit(current_user, "database.backup_delete", "database", None, {"name": name})
+    db.session.commit()
+    flash("flash.admin_saved", "success")
+    return redirect(url_for("admin.database"))
+
+
+@bp.post("/database/cleanup")
+def database_cleanup():
+    """Only two kinds exist: read notices and old security-log lines. Anything else is refused, never guessed."""
+    kind = request.form.get("kind", "")
+    try:
+        days = int(request.form.get("days", ""))
+    except ValueError:
+        days = 0
+    try:
+        if kind == "notices":
+            removed = dbs.cleanup_read_notices(days)
+        elif kind == "events":
+            removed = dbs.cleanup_security_events(days)
+        else:
+            raise ServiceError("admin.db.bad_kind")
+        svc.audit(current_user, "database.cleanup", "database", None, {"kind": kind, "days": days, "removed": removed})
+        db.session.commit()
+        flash("flash.admin_saved", "success")
+    except ServiceError as exc:
+        flash([exc.key, exc.values], "error")
+    return redirect(url_for("admin.database"))
