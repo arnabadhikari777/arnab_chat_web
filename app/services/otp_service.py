@@ -71,7 +71,11 @@ def discard_otp(row: OtpVerification) -> None:
 
 
 def verify_otp(email: str, purpose: str, code: str) -> None:
-    """Return None on success, raise OtpError otherwise."""
+    """Return None on success, raise OtpError otherwise.
+
+    Counting a wrong try and consuming a right code are both single SQL statements, so two requests
+    arriving at the same moment cannot both spend the same code (replay) or share one attempt.
+    """
     cfg = current_app.config
     now = utcnow()
     row = (
@@ -79,19 +83,29 @@ def verify_otp(email: str, purpose: str, code: str) -> None:
         .order_by(OtpVerification.id.desc())
         .first()
     )
-    if row is None or row.expires_at < now:
+    if row is None:
         raise OtpError("otp.invalid")
+    if row.expires_at < now:
+        raise OtpError("otp.expired")
     if row.attempts >= cfg["OTP_MAX_ATTEMPTS"]:
         raise OtpError("otp.locked")
 
     code = (code or "").strip()
     if not hmac.compare_digest(_hash(email, purpose, code), row.code_hash):
-        row.attempts += 1
+        OtpVerification.query.filter_by(id=row.id, used_at=None).update(
+            {"attempts": OtpVerification.attempts + 1}, synchronize_session=False
+        )
         db.session.commit()
+        db.session.refresh(row)
         left = cfg["OTP_MAX_ATTEMPTS"] - row.attempts
         if left <= 0:
             raise OtpError("otp.locked")
         raise OtpError("otp.wrong", left=left)
 
-    row.used_at = now  # single use
+    # Single use: only the request that flips used_at from NULL wins.
+    spent = OtpVerification.query.filter_by(id=row.id, used_at=None).update(
+        {"used_at": now}, synchronize_session=False
+    )
     db.session.commit()
+    if spent != 1:
+        raise OtpError("otp.invalid")

@@ -55,8 +55,8 @@ def fake_services(app, monkeypatch):
                       CLOUDINARY_API_KEY="k", CLOUDINARY_API_SECRET="s")
     sent, uploads, deleted = [], [], []
 
-    def fake_send(to, subject, body):
-        sent.append({"to": to, "subject": subject, "body": body})
+    def fake_send(to, subject, body, html=None):
+        sent.append({"to": to, "subject": subject, "body": body, "html": html})
 
     def fake_upload(stream, **options):
         uploads.append(options)

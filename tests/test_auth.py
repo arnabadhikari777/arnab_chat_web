@@ -175,7 +175,7 @@ def test_email_failure_keeps_account_and_allows_immediate_retry(client, fakes, m
     assert res.status_code == 302
     assert b"could not send the email" in client.get("/verify-email").data
     assert OtpVerification.query.count() == 0          # no dead code left behind
-    monkeypatch.setattr(email_service, "send_email", lambda to, s, b: fakes.sent.append({"body": b}))
+    monkeypatch.setattr(email_service, "send_email", lambda to, s, b, html=None: fakes.sent.append({"body": b}))
     client.post("/verify-email/resend")
     assert len(fakes.sent) == 1
 
@@ -208,7 +208,7 @@ def test_code_expires(client, fakes):
     row.expires_at = utcnow() - timedelta(seconds=1)
     db.session.commit()
     res = client.post("/verify-email", data={"code": last_code(fakes)})
-    assert b"wrong or has expired" in res.data
+    assert b"This code has expired" in res.data
 
 
 def test_code_works_only_once(client, fakes):

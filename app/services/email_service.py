@@ -23,9 +23,11 @@ import requests
 from flask import current_app
 
 from ..i18n import t
+from .email_templates import render_otp_html
 from .errors import EmailDeliveryError
 
 _HTTP_PROVIDERS = {"sendgrid", "mailgun", "brevo", "resend"}
+_RESET_LIKE = ("reset_password", "change_password")   # "ignore this email and nothing changes" wording
 
 
 def _from_address(cfg) -> str:
@@ -75,12 +77,14 @@ def _smtp_connect(cfg):
     return smtp
 
 
-def _send_smtp(cfg, to: str, subject: str, body: str) -> None:
+def _send_smtp(cfg, to: str, subject: str, body: str, html: str | None = None) -> None:
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = formataddr((cfg["MAIL_FROM_NAME"], _from_address(cfg)))
     msg["To"] = to
     msg.set_content(body)
+    if html:
+        msg.add_alternative(html, subtype="html")     # text first, HTML second: clients show the last they can
     smtp = None
     for attempt in (1, 2):
         try:
@@ -125,7 +129,7 @@ def _post_json(url: str, *, headers: dict, json: dict | None = None, data: dict 
         raise last
 
 
-def _send_http(cfg, to: str, subject: str, body: str) -> None:
+def _send_http(cfg, to: str, subject: str, body: str, html: str | None = None) -> None:
     provider, key, sender = cfg["MAIL_PROVIDER"], cfg["MAIL_API_KEY"], _from_address(cfg)
     name, timeout = cfg["MAIL_FROM_NAME"], cfg["MAIL_TIMEOUT_SECONDS"]
     if provider == "sendgrid":
@@ -133,29 +137,52 @@ def _send_http(cfg, to: str, subject: str, body: str) -> None:
                    headers={"Authorization": f"Bearer {key}"}, timeout=timeout,
                    json={"personalizations": [{"to": [{"email": to}]}],
                          "from": {"email": sender, "name": name}, "subject": subject,
-                         "content": [{"type": "text/plain", "value": body}]})
+                         "content": [{"type": "text/plain", "value": body}]
+                                    + ([{"type": "text/html", "value": html}] if html else [])})
     elif provider == "mailgun":
         domain = cfg["MAIL_API_DOMAIN"]
         if not domain:
             raise RuntimeError("MAIL_API_DOMAIN is missing (needed for Mailgun)")
         _post_json(f"https://api.mailgun.net/v3/{domain}/messages", headers={}, timeout=timeout,
                    auth=("api", key),
-                   data={"from": formataddr((name, sender)), "to": to, "subject": subject, "text": body})
+                   data={"from": formataddr((name, sender)), "to": to, "subject": subject, "text": body,
+                         **({"html": html} if html else {})})
     elif provider == "brevo":
         _post_json("https://api.brevo.com/v3/smtp/email",
                    headers={"api-key": key, "accept": "application/json"}, timeout=timeout,
                    json={"sender": {"name": name, "email": sender}, "to": [{"email": to}],
-                         "subject": subject, "textContent": body})
+                         "subject": subject, "textContent": body,
+                         **({"htmlContent": html} if html else {})})
     elif provider == "resend":
         _post_json("https://api.resend.com/emails",
                    headers={"Authorization": f"Bearer {key}"}, timeout=timeout,
-                   json={"from": formataddr((name, sender)), "to": [to], "subject": subject, "text": body})
+                   json={"from": formataddr((name, sender)), "to": [to], "subject": subject, "text": body,
+                         **({"html": html} if html else {})})
     else:
         raise RuntimeError(f"Unknown MAIL_PROVIDER {provider!r}")
 
 
+# ---------------------------------------------------------------- diagnostics
+def _hint(exc: Exception) -> str:
+    """One plain-language line for the server log. Never contains the password."""
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        return ("Gmail refused the login. Use a 16-character App Password (needs 2-Step Verification) "
+                "and make MAIL_USERNAME the same Gmail address")
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "Timed out. The host may block outgoing SMTP, or MAIL_TIMEOUT_SECONDS is too low"
+    if isinstance(exc, ssl.SSLError):
+        return "TLS failed. Port 587 needs STARTTLS and port 465 needs SSL; check MAIL_PORT"
+    if isinstance(exc, (ConnectionRefusedError, socket.gaierror)):
+        return "Could not reach the mail server. Check MAIL_SERVER / MAIL_PORT and the host's network rules"
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return "The recipient address was rejected by the mail server"
+    if isinstance(exc, smtplib.SMTPSenderRefused):
+        return "The sender address was rejected; MAIL_FROM_ADDRESS must be the Gmail account or one of its aliases"
+    return "See the error below"
+
+
 # ---------------------------------------------------------------- public API
-def send_email(to: str, subject: str, body: str) -> None:
+def send_email(to: str, subject: str, body: str, html: str | None = None) -> None:
     cfg = current_app.config
 
     if not is_configured():
@@ -167,19 +194,21 @@ def send_email(to: str, subject: str, body: str) -> None:
 
     try:
         if cfg["MAIL_PROVIDER"] in _HTTP_PROVIDERS:
-            _send_http(cfg, to, subject, body)
+            _send_http(cfg, to, subject, body, html)
         else:
-            _send_smtp(cfg, to, subject, body)
+            _send_smtp(cfg, to, subject, body, html)
     except Exception as exc:  # noqa: BLE001 - every failure becomes one generic answer for the person
         # The real reason goes to the server log only (never the address in a way that helps an attacker).
-        current_app.logger.error("Could not send email (provider=%s): %r", cfg["MAIL_PROVIDER"], exc)
+        current_app.logger.error("Could not send email (provider=%s): %s | %r", cfg["MAIL_PROVIDER"],
+                                 _hint(exc), exc)
         raise EmailDeliveryError() from exc
 
 
 def send_otp_email(to: str, code: str, purpose: str, lang: str) -> None:
     app_name = current_app.config["APP_NAME"]
     minutes = current_app.config["OTP_EXPIRY_MINUTES"]
-    key = "email.otp.reset" if purpose == "reset_password" else "email.otp.register"
+    key = "email.otp.reset" if purpose in _RESET_LIKE else "email.otp.register"
     subject = t("email.otp.subject", lang=lang, app=app_name)
     body = t(key, lang=lang, app=app_name, code=code, minutes=minutes)
-    send_email(to, subject, body)
+    html = render_otp_html(app_name=app_name, code=code, minutes=minutes, purpose=purpose, lang=lang)
+    send_email(to, subject, body, html)

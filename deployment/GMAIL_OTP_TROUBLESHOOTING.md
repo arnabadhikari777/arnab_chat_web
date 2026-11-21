@@ -53,3 +53,9 @@ OTP codes expire after `OTP_EXPIRY_MINUTES` (default 10 minutes). Resending is l
 `OTP_RESEND_COOLDOWN_SECONDS` (default 60 seconds). A newly issued code invalidates the
 previous code. If delivery fails, the newly created OTP record is discarded so the user
 can retry without waiting for the cooldown.
+
+## 4. What the email looks like
+
+Codes are sent as a styled HTML email with a plain-text copy. If a mail app shows only plain text, the same code is in it.
+An expired code shows "This code has expired"; a wrong code shows how many tries are left; after the last try a new code
+must be requested (wait for the resend timer).
