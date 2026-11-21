@@ -41,11 +41,31 @@ def is_configured() -> bool:
 
 # ---------------------------------------------------------------- SMTP (Gmail)
 def _smtp_connect(cfg):
-    """Connect + secure + log in. Safe to retry: nothing has been sent yet."""
-    smtp = smtplib.SMTP(cfg["MAIL_SERVER"], cfg["MAIL_PORT"], timeout=cfg["MAIL_TIMEOUT_SECONDS"])
+    """Open a correctly encrypted SMTP connection and authenticate.
+
+    Port 465 uses implicit TLS; port 587 (and other submission ports) uses STARTTLS.
+    Gmail App Passwords are sometimes copied with visual spaces, so normalize those.
+    Safe to retry: this function never sends a message.
+    """
+    host = str(cfg["MAIL_SERVER"]).strip()
+    port = int(cfg["MAIL_PORT"])
+    timeout = int(cfg["MAIL_TIMEOUT_SECONDS"])
+    context = ssl.create_default_context()
+
+    if port == 465:
+        smtp = smtplib.SMTP_SSL(host, port, timeout=timeout, context=context)
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=timeout)
+
     try:
-        smtp.starttls(context=ssl.create_default_context())
-        smtp.login(cfg["MAIL_USERNAME"], cfg["MAIL_PASSWORD"])
+        # Explicit EHLO before and after STARTTLS makes the negotiated capabilities clear.
+        smtp.ehlo()
+        if port != 465:
+            smtp.starttls(context=context)
+            smtp.ehlo()
+        username = str(cfg["MAIL_USERNAME"]).strip()
+        password = "".join(str(cfg["MAIL_PASSWORD"]).split())
+        smtp.login(username, password)
     except Exception:
         try:
             smtp.close()

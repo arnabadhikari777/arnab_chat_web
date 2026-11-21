@@ -42,14 +42,14 @@ SQLite needs no server and no password. The database is one file. **Back it up b
 | Variable | Meaning |
 |---|---|
 | `MAIL_PROVIDER` | `smtp` (default, Gmail), or `sendgrid` / `mailgun` / `brevo` / `resend` (HTTPS APIs). |
-| `MAIL_SERVER`, `MAIL_PORT` | Gmail: `smtp.gmail.com`, `587`. |
+| `MAIL_SERVER`, `MAIL_PORT` | Gmail: `smtp.gmail.com`, `587` (STARTTLS) or `465` (implicit SSL). |
 | `MAIL_USERNAME` | Your Gmail address. |
 | `MAIL_PASSWORD` | A Gmail **App Password** (16 characters), **not** your normal password. |
 | `MAIL_FROM_NAME`, `MAIL_FROM_ADDRESS` | Sender name / address (address defaults to `MAIL_USERNAME`). |
 | `MAIL_API_KEY`, `MAIL_API_DOMAIN` | Only for the API providers (`MAIL_API_DOMAIN` only for Mailgun). |
 
 Gmail App Password: Google Account → Security → turn on 2-Step Verification → Security → **App passwords** →
-create one named "Goppo". Paste the 16 characters (no spaces) into `MAIL_PASSWORD`.
+create one named "Goppo". Paste the 16 characters into `MAIL_PASSWORD` (spaces are automatically removed). Do not use your normal Gmail password. Port 587 uses STARTTLS; port 465 uses SSL.
 
 Test without sending anything:
 
@@ -102,3 +102,4 @@ server every few seconds. Do not install Flask-SocketIO there.
 
 * Never paste real values into this guide, into chat, into a ticket, or into Git.
 * After editing `.env` you must **Reload** the web app (Web tab → green Reload button).
+\n\nFor step-by-step diagnosis, see [Gmail OTP troubleshooting](GMAIL_OTP_TROUBLESHOOTING.md).\n
