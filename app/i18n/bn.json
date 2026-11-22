@@ -216,6 +216,8 @@
   "chat.options": "মেসেজের অপশন",
   "chat.download": "ডাউনলোড",
   "chat.too_large": "ফাইলটি অনেক বড়। সীমা {size} MB।",
+  "chat.image_failed": "ছবিটি লোড করা যায়নি।",
+  "chat.image_retry": "আবার চেষ্টা করুন",
   "chat.hello_preview": "হ্যালো বলুন",
   "msg.empty": "আগে মেসেজ লিখুন।",
   "msg.too_long": "মেসেজটি অনেক বড়। সীমা {max} অক্ষর।",

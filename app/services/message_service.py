@@ -69,18 +69,47 @@ def _existing(user_id: int, client_uuid: str):
     return Message.query.filter_by(sender_id=user_id, client_uuid=client_uuid).first()
 
 
-def _after_send(user: User, conv: Conversation, msg: Message) -> None:
-    """The message is committed first, so nothing that goes wrong with a notice or a push can lose it."""
+def _commit_message(conv: Conversation, msg: Message) -> None:
+    """The ONLY step whose failure means "the message was not saved". Everything after it is best effort."""
     conv.last_message_at = msg.created_at
     db.session.commit()
-    get_backend().publish("message", conv.id, {"id": msg.id})
-    other = db.session.get(User, conv.other_user_id(user.id))
-    if not (other and other.is_active):
-        return
-    note = _notify_recipient(other, user, conv)
-    if note is not None:
-        from . import push_service
-        push_service.notify_after_commit(note, force=True)    # new activity: send again with the new count
+
+
+def _after_commit(user: User, conv: Conversation, msg_id: int) -> None:
+    """Side effects of a message that is ALREADY saved: realtime event, notice, Web Push.
+
+    Nothing in here may raise. A failed notice or push is logged and the sender still gets "sent": the message
+    is in the database, and its tick stays a single tick until the recipient's phone confirms receipt.
+    """
+    try:
+        get_backend().publish("message", conv.id, {"id": msg_id})
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("realtime publish failed for conversation %s", conv.id)
+    try:
+        other = db.session.get(User, conv.other_user_id(user.id))
+        if not (other and other.is_active):
+            return
+        note = _notify_recipient(other, user, conv)
+        if note is not None:
+            from . import push_service
+            push_service.notify_after_commit(note, force=True)    # new activity: send again with the new count
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.exception("notification after message failed for conversation %s", conv.id)
+
+
+def _after_send(user: User, conv: Conversation, msg: Message) -> None:
+    """Commit the message first, then run the best-effort side effects (see _after_commit)."""
+    _commit_message(conv, msg)
+    _after_commit(user, conv, msg.id)
+
+
+def _existing_after_race(user_id: int, client_uuid: str) -> Message:
+    """A double tap: the other request owns this client_uuid, so return its message (never a duplicate)."""
+    old = _existing(user_id, client_uuid)
+    if old is None:
+        raise ServiceError("msg.bad_request")
+    return old
 
 
 def _notify_recipient(other: User, user: User, conv: Conversation):
@@ -131,7 +160,7 @@ def send_text(user: User, conv: Conversation, client_uuid: str, body: str):
         db.session.flush()
     except IntegrityError:           # two taps at the same moment
         db.session.rollback()
-        return _existing(user.id, client_uuid), False
+        return _existing_after_race(user.id, client_uuid), False
     _after_send(user, conv, msg)
     return msg, True
 
@@ -170,14 +199,18 @@ def send_media(user: User, conv: Conversation, client_uuid: str, file, voice: bo
         db.session.flush()
     except IntegrityError:
         db.session.rollback()
-        cloudinary_service.delete_asset(asset["public_id"], asset["resource_type"])
-        return _existing(user.id, client_uuid), False
+        cloudinary_service.delete_asset(asset["public_id"], asset["resource_type"])   # the other request keeps its own upload
+        return _existing_after_race(user.id, client_uuid), False
     try:
-        _after_send(user, conv, msg)
+        _commit_message(conv, msg)
     except Exception:
+        # Only HERE is the message really not saved, so only here is the uploaded file removed.
         db.session.rollback()
         cloudinary_service.delete_asset(asset["public_id"], asset["resource_type"])
         raise
+    # From this line on the message AND its Cloudinary asset are permanent: a notice/push problem must never
+    # delete the asset or fail the request.
+    _after_commit(user, conv, msg.id)
     return msg, True
 
 

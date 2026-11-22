@@ -216,6 +216,8 @@
   "chat.options": "Message options",
   "chat.download": "Download",
   "chat.too_large": "This file is too big. The limit is {size} MB.",
+  "chat.image_failed": "This picture could not be loaded.",
+  "chat.image_retry": "Try again",
   "chat.hello_preview": "Say hello",
   "msg.empty": "Write a message first.",
   "msg.too_long": "This message is too long. The limit is {max} characters.",

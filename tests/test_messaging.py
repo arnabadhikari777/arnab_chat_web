@@ -548,12 +548,13 @@ def test_retrying_a_file_does_not_upload_twice(app, duo, fake_services):
 
 
 def test_database_failure_after_upload_cleans_the_cloud_file(app, duo, fake_services, monkeypatch):
+    """The message could NOT be saved (the commit failed): only then is the uploaded file removed."""
     from app.services import message_service
 
     def boom(*a, **k):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(message_service, "_after_send", boom)
+    monkeypatch.setattr(message_service, "_commit_message", boom)
     app.config["PROPAGATE_EXCEPTIONS"] = False
     res = file_post(duo.a, duo, PNG, "p.png")
     assert res.status_code == 500 and fake_services.deleted == ["pid1"]

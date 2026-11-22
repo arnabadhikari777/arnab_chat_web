@@ -19,6 +19,7 @@ from typing import Any
 
 from flask import current_app, url_for
 from itsdangerous import BadData, URLSafeTimedSerializer
+from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
 from ..models import Conversation, Message, Notification, PushDelivery, PushSubscription, User
@@ -260,3 +261,158 @@ def _send_one(sub: PushSubscription, payload: dict, group_key: str) -> tuple[str
         return ("expired" if code in GONE_STATUSES else "failed"), str(exc)[:300]
     except Exception as exc:  # noqa: BLE001 - e.g. a blocked redirect or a network error: failed, never a crash
         return "failed", exc.__class__.__name__
+
+
+# ------------------------------------------------------------------ queue, retry and offline recovery
+# One PushDelivery row = one notification on one device. The row is the durable queue entry:
+#   pending  -> created, not sent yet (or the process stopped before the answer was saved)
+#   failed   -> the push service refused / timed out; retried a bounded number of times by sync
+#   accepted -> the push service queued it (phone may still be off; it arrives when the phone is back)
+#   expired  -> the device is gone for good; its subscription is dropped
+# "accepted" is NEVER a delivery proof. Only acked_at (the phone's receipt) is, see acknowledge_receipt().
+EXPIRED_KEEP_DAYS = 1               # an expired subscription is kept this long, then removed for good
+DELIVERY_KEEP_DAYS = 30             # old delivery rows are cleaned up after this
+
+
+def _group_key(note: Notification) -> str:
+    return note.dedupe_key or f"n:{note.id}"
+
+
+def _push_available() -> bool:
+    return _push_switch_on() and vapid_status().configured
+
+
+def _get_or_create_delivery(note: Notification, sub: PushSubscription) -> PushDelivery:
+    """The (notification, device) pair is unique, so two requests at the same moment cannot double-queue."""
+    row = PushDelivery.query.filter_by(notification_id=note.id, subscription_id=sub.id).first()
+    if row is not None:
+        return row
+    row = PushDelivery(notification_id=note.id, subscription_id=sub.id, user_id=sub.user_id,
+                       group_key=_group_key(note), status="pending", attempt_count=0)
+    try:
+        with db.session.begin_nested():
+            db.session.add(row)
+            db.session.flush()
+    except IntegrityError:
+        row = PushDelivery.query.filter_by(notification_id=note.id, subscription_id=sub.id).first()
+        if row is None:
+            raise
+    return row
+
+
+def _attempt(row: PushDelivery, note: Notification, user: User, sub: PushSubscription) -> str:
+    """One send to one device. Never raises. Returns accepted | failed | expired and saves the outcome."""
+    row.attempt_count = (row.attempt_count or 0) + 1
+    try:
+        payload = _build_payload(note, user, sub)
+        outcome, error = _send_one(sub, payload, row.group_key)
+    except Exception as exc:  # noqa: BLE001 - a push problem must never reach the person sending a message
+        outcome, error = "failed", exc.__class__.__name__
+    if outcome not in ("accepted", "expired"):
+        outcome = "failed"
+    now = utcnow()
+    sub.last_attempt_at = now
+    row.status = outcome
+    row.last_error = (error or "")[:300] or None
+    if outcome == "accepted":
+        row.accepted_at = now
+        row.last_error = None
+        sub.last_success_at = now
+        sub.failure_count = 0
+    elif outcome == "expired":
+        sub.status = "expired"           # removed by cleanup_expired(); this device is not tried again
+    else:
+        sub.failure_count = (sub.failure_count or 0) + 1
+    return outcome
+
+
+def enqueue_and_send(note: Notification, force: bool = False) -> int:
+    """Queue `note` for every active device of its recipient and try to send it now (short timeout).
+
+    force=False: a device that already accepted this notification, or used up its attempts, is skipped.
+    force=True : new activity in the same chat (the counter changed): send again, attempts start over.
+    Returns how many devices the push service accepted. Accepted does NOT mean delivered.
+    """
+    if note is None or note.id is None or not _push_available():
+        return 0
+    user = db.session.get(User, note.user_id)
+    if user is None or not user.is_active or not _wanted(user, note):
+        return 0
+    accepted = 0
+    for sub in list_active_subscriptions(user.id):
+        row = _get_or_create_delivery(note, sub)
+        if force:
+            row.attempt_count, row.acked_at = 0, None      # a new push needs its own receipt
+        elif row.status == "accepted" or (row.attempt_count or 0) >= MAX_ATTEMPTS:
+            continue
+        if _attempt(row, note, user, sub) == "accepted":
+            accepted += 1
+        db.session.commit()                                 # save each device's result on its own
+    return accepted
+
+
+def notify_after_commit(note: Notification | None, force: bool = False) -> int:
+    """Called after the message / notice is safely committed. A push problem of ANY kind is logged and
+    swallowed: it must never turn a saved message into an error for the sender."""
+    if note is None:
+        return 0
+    try:
+        return enqueue_and_send(note, force=force)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        log.exception("push after commit failed (notification %s)", getattr(note, "id", None))
+        return 0
+
+
+def cleanup_expired(user_id: int | None = None) -> int:
+    """Remove subscriptions that were dead for a day (and their queue rows) and very old delivery rows."""
+    now = utcnow()
+    q = PushSubscription.query.filter(PushSubscription.status == "expired",
+                                      PushSubscription.updated_at < now - timedelta(days=EXPIRED_KEEP_DAYS))
+    if user_id is not None:
+        q = q.filter(PushSubscription.user_id == user_id)
+    ids = [s.id for s in q.all()]
+    if ids:
+        PushDelivery.query.filter(PushDelivery.subscription_id.in_(ids)).delete(synchronize_session=False)
+        PushSubscription.query.filter(PushSubscription.id.in_(ids)).delete(synchronize_session=False)
+    PushDelivery.query.filter(PushDelivery.updated_at < now - timedelta(days=DELIVERY_KEEP_DAYS)).delete(
+        synchronize_session=False)
+    db.session.commit()
+    return len(ids)
+
+
+def sync_pending_for_user(user_id: int, limit: int = 20) -> dict[str, int]:
+    """Retry pushes of this person that failed earlier (called by /api/push/sync when the app opens or comes
+    back online). Bounded: at most MAX_ATTEMPTS per notification+device, only for unread notices, only on
+    active devices, only within the push TTL. It never creates a push that was not attempted before."""
+    result = {"accepted": 0, "failed": 0, "expired": 0}
+    try:
+        cleanup_expired(user_id)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        log.exception("push cleanup failed")
+    if not _push_available():
+        return result
+    user = db.session.get(User, user_id)
+    if user is None or not user.is_active:
+        return result
+    horizon = utcnow() - timedelta(seconds=int(current_app.config.get("PUSH_TTL_SECONDS", 86400)))
+    rows = (PushDelivery.query
+            .join(PushSubscription, PushSubscription.id == PushDelivery.subscription_id)
+            .join(Notification, Notification.id == PushDelivery.notification_id)
+            .filter(PushDelivery.user_id == user_id, PushDelivery.status.in_(("pending", "failed")),
+                    PushDelivery.attempt_count < MAX_ATTEMPTS, PushDelivery.updated_at >= horizon,
+                    PushSubscription.status == "active", Notification.is_read.is_(False))
+            .order_by(PushDelivery.updated_at.asc()).limit(max(1, min(int(limit), 50))).all())
+    for row in rows:
+        try:
+            note = db.session.get(Notification, row.notification_id)
+            sub = db.session.get(PushSubscription, row.subscription_id)
+            if note is None or sub is None or not _wanted(user, note):
+                continue
+            result[_attempt(row, note, user, sub)] += 1
+            db.session.commit()
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+            log.exception("push retry failed")
+    return result

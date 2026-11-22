@@ -82,16 +82,36 @@
     return wrap;
   }
 
+  /* A picture that cannot load shows a calm message with a Retry button instead of a broken icon. */
+  function imageNode(a) {
+    const wrap = el("div", "media-wrap");
+    const failed = () => {
+      const box = el("div", "media-error");
+      const retryBtn = el("button", "media-error__retry", t("chat.image_retry")); retryBtn.type = "button";
+      retryBtn.addEventListener("click", () => load(true));
+      box.append(icon("i-alert"), el("span", "", t("chat.image_failed")), retryBtn);
+      wrap.replaceChildren(box);
+    };
+    const load = (bust) => {
+      const open = el("button", "media"); open.type = "button";
+      const img = el("img"); img.alt = a.name || ""; img.decoding = "async";
+      img.addEventListener("error", failed);
+      // a retry asks the network again instead of reusing the cached failure (not possible for local blob: previews)
+      img.src = bust && /^https?:/.test(a.url) ? a.url + (a.url.includes("?") ? "&" : "?") + "r=" + Date.now() : a.url;
+      open.appendChild(img);
+      open.addEventListener("click", () => lightbox(a.url));
+      wrap.replaceChildren(open);
+    };
+    load(false);
+    return wrap;
+  }
+
   function content(m) {
     const box = el("div", "bubble__content");
     if (m.deleted) { box.appendChild(el("p", "bubble__text bubble--deleted", t("chat.deleted"))); return box; }
     const a = m.att;
     if (m.type === "image" && a) {
-      const open = el("button", "media"); open.type = "button";
-      const img = el("img"); img.src = a.url; img.alt = a.name || ""; img.loading = "lazy";
-      open.appendChild(img);
-      open.addEventListener("click", () => lightbox(a.url));
-      box.appendChild(open);
+      box.appendChild(imageNode(a));
     } else if (m.type === "video" && a) {
       const v = el("video", "media"); v.src = a.url; v.controls = true; v.preload = "metadata"; v.playsInline = true;
       box.appendChild(v);
@@ -129,7 +149,7 @@
     row.dataset.id = m.id || "";
     row.dataset.day = new Date(m.at).toDateString();
     const bubble = row.firstChild;
-    const sig = [m.deleted, m.type, m.body, m.att && m.att.url, m.progress !== undefined].join("|");
+    const sig = [m.deleted, m.type, m.body, m.att && m.att.url, m.progress !== undefined, !!m.id, !!m.pending].join("|");
     if (row._sig !== sig) {
       row._sig = sig;
       bubble.replaceChildren(content(m));
@@ -175,8 +195,11 @@
     const merged = { ...old, ...m, pending: false, progress: undefined };
     state.msgs.set(m.uuid, merged);
     let row = state.els.get(m.uuid);
-    if (row) { fill(row, merged); }
-    else {
+    if (row) {
+      fill(row, merged);
+      const oldUrl = old && old.att && old.att.url;
+      if (oldUrl && oldUrl.startsWith("blob:") && (!merged.att || merged.att.url !== oldUrl)) URL.revokeObjectURL(oldUrl);
+    } else {
       row = build(merged);
       state.els.set(m.uuid, row);
       if (prepend) list.insertBefore(row, list.querySelector(".msg"));
@@ -328,7 +351,7 @@
     } else syncNow();
   });
   window.addEventListener("focus", () => { markSeen(); syncNow(); });
-  window.addEventListener("online", syncNow);
+  window.addEventListener("online", () => { retryFailed(); syncNow(); });
   window.addEventListener("pageshow", (e) => { if (e.persisted) syncNow(); });   // back/forward cache, phone unlocked
 
   /* ---------------------------------------------------------------- sending */
@@ -361,9 +384,14 @@
   function sendText(text) {
     const m = { uuid: uuid(), type: "text", body: text, mine: true, status: "sending", pending: true, at: new Date().toISOString() };
     addPending(m);
-    const go = async () => {
+    const go = async (auto = 0) => {
       setLocal(m.uuid, { status: "sending" });
-      finish(m.uuid, await api(API + "/messages", { method: "POST", json: { uuid: m.uuid, body: text } }), text);
+      const res = await api(API + "/messages", { method: "POST", json: { uuid: m.uuid, body: text } });
+      if (!res.ok && (res.status === 0 || res.status >= 500) && typeof auto === "number" && auto < 2) {
+        setTimeout(() => go(auto + 1), auto === 0 ? 1500 : 4000);   // same uuid: the server returns the saved message, never a copy
+        return;
+      }
+      finish(m.uuid, res, text);
     };
     sending.set(m.uuid, go); go();
   }
@@ -413,6 +441,10 @@
     sending.set(m.uuid, go); go();
   }
   function retry(u) { const go = sending.get(u); if (go) go(); }
+  /* Connection is back: send again what failed while offline (same uuid = no duplicates). */
+  function retryFailed() {
+    state.msgs.forEach((m) => { if (m.mine && m.status === "failed" && sending.has(m.uuid)) retry(m.uuid); });
+  }
 
   /* ---------------------------------------------------------------- composer */
   function sync() {

@@ -105,6 +105,10 @@ def send(conversation_id):
         return _error(exc, 400)
     except ServiceError as exc:
         return _error(exc, 400)
+    except Exception:  # noqa: BLE001 - the message could NOT be saved: clean JSON, and a retry with the same uuid is safe
+        db.session.rollback()
+        current_app.logger.exception("sending a message failed (conversation %s)", conversation_id)
+        return jsonify({"ok": False, "error": {"code": "server_error", "message": t("toast.something_wrong")}}), 500
     return jsonify({"ok": True, "created": created,
                     "message": message_service.serialize(msg, current_user.id)}), (201 if created else 200)
 
