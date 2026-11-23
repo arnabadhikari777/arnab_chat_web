@@ -1,0 +1,23 @@
+# Render Blueprint (optional). You can also create the service by hand: see docs/DEPLOY_RENDER.md
+services:
+  - type: web
+    name: goppo-calling
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free            # free instances sleep after ~15 min idle (cold start); use "starter" for always-on
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: CALLING_HMAC_SECRET
+        sync: false       # set in the dashboard; MUST equal CALLING_HMAC_SECRET on PythonAnywhere
+      - key: ALLOWED_ORIGINS
+        sync: false       # e.g. https://YOURNAME.pythonanywhere.com
+      - key: STUN_URLS
+        value: stun:stun.l.google.com:19302
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_SHARED_SECRET
+        sync: false
+      - key: REQUIRE_NATIVE
+        value: "true"

@@ -1,0 +1,7 @@
+{
+  "name": "goppo-calling-client-tests",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": { "test": "node --test --test-timeout=20000 calling.test.js" },
+  "devDependencies": { "jsdom": "^24.1.0" }
+}

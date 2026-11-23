@@ -1,0 +1,9 @@
+chat-web
+docs
+**/target
+**/node_modules
+native
+.git
+*.md
+**/*.o
+**/.env

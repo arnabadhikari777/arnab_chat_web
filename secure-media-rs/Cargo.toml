@@ -1,0 +1,19 @@
+[package]
+name = "goppo-secure-media"
+version = "2.0.0"
+edition = "2021"
+description = "Goppo calling: signaling validation, call-session state machine, network-quality scoring, RTP header inspection"
+license = "MIT"
+
+[lib]
+name = "goppo_secure_media"
+crate-type = ["staticlib", "rlib"]
+
+# No third-party dependencies on purpose: smaller attack surface, reproducible offline build.
+[dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
