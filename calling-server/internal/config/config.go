@@ -25,21 +25,35 @@ type Config struct {
 	RingTimeout      time.Duration
 	ReconnectGrace   time.Duration
 	TokenMaxAge      time.Duration
+
+	// Turnix (Render only; token never sent to browsers or PythonAnywhere)
+	TurnixAPIToken string
+
+	// Admin panel (Render only)
+	AdminPassword string
+
+	// Provider selection persistence and bootstrap
+	TurnConfigPath     string // e.g. /data/turn_config.json when a Render disk is mounted
+	ActiveTurnProvider string // optional env bootstrap: "metered" | "turnix" (default metered)
 }
 
 func Load() (*Config, error) {
 	c := &Config{
-		Port:             env("PORT", "8080"),
-		STUNURLs:         split(env("STUN_URLS", "stun:stun.l.google.com:19302")),
-		TURNURLs:         split(env("TURN_URLS", "")),
-		TURNSharedSecret: env("TURN_SHARED_SECRET", ""),
-		TURNStaticUser:   env("TURN_STATIC_USERNAME", ""),
-		TURNStaticPass:   env("TURN_STATIC_PASSWORD", ""),
-		TURNCredTTL:      dur("TURN_CREDENTIAL_TTL_SECONDS", 3600),
-		RequireNative:    env("REQUIRE_NATIVE", "true") != "false",
-		RingTimeout:      dur("RING_TIMEOUT_SECONDS", 75),
-		ReconnectGrace:   dur("RECONNECT_GRACE_SECONDS", 20),
-		TokenMaxAge:      dur("TOKEN_MAX_AGE_SECONDS", 300),
+		Port:               env("PORT", "8080"),
+		STUNURLs:           split(env("STUN_URLS", "stun:stun.l.google.com:19302")),
+		TURNURLs:           split(env("TURN_URLS", "")),
+		TURNSharedSecret:   env("TURN_SHARED_SECRET", ""),
+		TURNStaticUser:     env("TURN_STATIC_USERNAME", ""),
+		TURNStaticPass:     env("TURN_STATIC_PASSWORD", ""),
+		TURNCredTTL:        dur("TURN_CREDENTIAL_TTL_SECONDS", 3600),
+		RequireNative:      env("REQUIRE_NATIVE", "true") != "false",
+		RingTimeout:        dur("RING_TIMEOUT_SECONDS", 75),
+		ReconnectGrace:     dur("RECONNECT_GRACE_SECONDS", 20),
+		TokenMaxAge:        dur("TOKEN_MAX_AGE_SECONDS", 300),
+		TurnixAPIToken:     env("TURNIX_API_TOKEN", ""),
+		AdminPassword:      env("ADMIN_PASSWORD", ""),
+		TurnConfigPath:     env("TURN_CONFIG_PATH", ""),
+		ActiveTurnProvider: strings.ToLower(env("ACTIVE_TURN_PROVIDER", "metered")),
 	}
 	secret := env("CALLING_HMAC_SECRET", "")
 	if len(secret) < 32 {
@@ -70,6 +84,9 @@ func Load() (*Config, error) {
 	}
 	if len(c.TURNURLs) > 0 && c.TURNSharedSecret == "" && (c.TURNStaticUser == "" || c.TURNStaticPass == "") {
 		return nil, errors.New("TURN_URLS is set but neither TURN_SHARED_SECRET nor TURN_STATIC_USERNAME/PASSWORD is")
+	}
+	if c.ActiveTurnProvider != "metered" && c.ActiveTurnProvider != "turnix" {
+		c.ActiveTurnProvider = "metered"
 	}
 	return c, nil
 }

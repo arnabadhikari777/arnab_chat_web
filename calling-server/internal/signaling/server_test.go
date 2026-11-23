@@ -14,6 +14,7 @@ import (
 	"github.com/goppo/calling-server/internal/config"
 	"github.com/goppo/calling-server/internal/native"
 	"github.com/goppo/calling-server/internal/session"
+	"github.com/goppo/calling-server/internal/turn"
 	"github.com/gorilla/websocket"
 )
 
@@ -44,7 +45,8 @@ func newEnv(t *testing.T, mut func(*config.Config)) *env {
 	scfg := session.DefaultConfig()
 	scfg.ResendAfter = 200 * time.Millisecond
 	mgr := session.NewManager(scfg)
-	srv := New(cfg, auth.NewValidator(secret, cfg.TokenMaxAge), mgr)
+	tm := turn.NewManager(cfg.STUNURLs, cfg.TURNURLs, cfg.TURNSharedSecret, cfg.TURNStaticUser, cfg.TURNStaticPass, cfg.TURNCredTTL, cfg.TurnixAPIToken, "")
+	srv := New(cfg, auth.NewValidator(secret, cfg.TokenMaxAge), mgr, tm, nil)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return &env{ts: ts, mgr: mgr, cfg: cfg}

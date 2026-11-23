@@ -12,11 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/goppo/calling-server/internal/admin"
 	"github.com/goppo/calling-server/internal/auth"
 	"github.com/goppo/calling-server/internal/config"
 	"github.com/goppo/calling-server/internal/native"
 	"github.com/goppo/calling-server/internal/session"
 	"github.com/goppo/calling-server/internal/signaling"
+	"github.com/goppo/calling-server/internal/turn"
 	"github.com/joho/godotenv"
 )
 
@@ -56,7 +58,33 @@ func main() {
 	scfg.RingTimeout, scfg.ReconnectGrace = cfg.RingTimeout, cfg.ReconnectGrace
 	mgr := session.NewManager(scfg)
 	val := auth.NewValidator(cfg.Secret, cfg.TokenMaxAge)
-	srv := signaling.New(cfg, val, mgr)
+
+	// TURN provider manager (Metered + optional Turnix). Default active = Metered.
+	configPath := cfg.TurnConfigPath
+	if configPath == "" {
+		// Best-effort local/ephemeral path; on Render free this will not survive restart.
+		configPath = "/tmp/goppo-turn-config.json"
+	}
+	tm := turn.NewManager(
+		cfg.STUNURLs, cfg.TURNURLs,
+		cfg.TURNSharedSecret, cfg.TURNStaticUser, cfg.TURNStaticPass,
+		cfg.TURNCredTTL,
+		cfg.TurnixAPIToken,
+		configPath,
+	)
+	// Bootstrap from env if no durable selection yet.
+	if st := tm.Status(); st.ActiveProvider == turn.ProviderMetered && cfg.ActiveTurnProvider == turn.ProviderTurnix && cfg.TurnixAPIToken != "" {
+		_ = tm.SetActive(turn.ProviderTurnix, false)
+	}
+
+	adm := admin.New(cfg.AdminPassword, cfg.Secret, tm)
+	if adm.Enabled() {
+		log.Printf("admin panel enabled at /admin (password from ADMIN_PASSWORD)")
+	} else {
+		log.Printf("admin panel disabled (set ADMIN_PASSWORD to enable)")
+	}
+
+	srv := signaling.New(cfg, val, mgr, tm, adm)
 
 	stopTick := make(chan struct{})
 	go func() {
@@ -77,7 +105,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	go func() {
-		log.Printf("goppo calling server listening on :%s (origins: %v)", cfg.Port, cfg.AllowedOrigins)
+		log.Printf("goppo calling server listening on :%s (origins: %v, active TURN: %s)", cfg.Port, cfg.AllowedOrigins, tm.Active())
 		if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %v", err)
 		}
@@ -86,11 +114,10 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
-	log.Println("shutting down")
+	log.Printf("shutting down…")
 	srv.Drain()
-	mgr.Shutdown()
 	close(stopTick)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	_ = hs.Shutdown(ctx)
 }

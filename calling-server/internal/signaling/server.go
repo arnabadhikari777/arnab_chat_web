@@ -1,7 +1,8 @@
-// Package signaling exposes the HTTP/WebSocket surface: /health /ready /ice /components /ws.
+// Package signaling exposes the HTTP/WebSocket surface: /health /ready /ice /components /ws and admin panel.
 package signaling
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -10,10 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goppo/calling-server/internal/admin"
 	"github.com/goppo/calling-server/internal/auth"
 	"github.com/goppo/calling-server/internal/config"
 	"github.com/goppo/calling-server/internal/native"
 	"github.com/goppo/calling-server/internal/session"
+	"github.com/goppo/calling-server/internal/turn"
 	"github.com/gorilla/websocket"
 )
 
@@ -24,14 +27,16 @@ type Server struct {
 	cfg      *config.Config
 	val      *auth.Validator
 	mgr      *session.Manager
+	turn     *turn.Manager
+	admin    *admin.Server
 	upgrader websocket.Upgrader
 	started  time.Time
 	sockets  atomic.Int64
 	draining atomic.Bool
 }
 
-func New(cfg *config.Config, val *auth.Validator, mgr *session.Manager) *Server {
-	s := &Server{cfg: cfg, val: val, mgr: mgr, started: time.Now()}
+func New(cfg *config.Config, val *auth.Validator, mgr *session.Manager, tm *turn.Manager, adm *admin.Server) *Server {
+	s := &Server{cfg: cfg, val: val, mgr: mgr, turn: tm, admin: adm, started: time.Now()}
 	s.upgrader = websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		Subprotocols: []string{subprotocol},
@@ -50,6 +55,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ice", s.ice)
 	mux.HandleFunc("/components", s.components)
 	mux.HandleFunc("/ws", s.ws)
+	if s.admin != nil {
+		s.admin.Mount(mux)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -68,6 +76,15 @@ func (s *Server) secure(next http.Handler) http.Handler {
 		h.Set("Cache-Control", "no-store")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Add("Vary", "Origin")
+		// Admin panel is same-origin browser use from the Render URL; do not apply chat-site CORS to it.
+		if strings.HasPrefix(r.URL.Path, "/admin") {
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		origin := r.Header.Get("Origin")
 		if origin != "" {
 			if !s.cfg.OriginAllowed(origin) {
@@ -121,6 +138,7 @@ func (s *Server) components(w http.ResponseWriter, r *http.Request) {
 }
 
 // /ice: STUN/TURN configuration. Requires a valid (unexpired, signed) call token; TURN credentials are short-lived.
+// Format preserved for the existing frontend: { iceServers, ttl_seconds, turn_configured }.
 func (s *Server) ice(w http.ResponseWriter, r *http.Request) {
 	tok := r.Header.Get("X-Call-Token")
 	claims, err := s.val.Verify(tok)
@@ -128,21 +146,23 @@ func (s *Server) ice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]any{"error": "invalid_token"})
 		return
 	}
-	servers := []map[string]any{}
-	if len(s.cfg.STUNURLs) > 0 {
-		servers = append(servers, map[string]any{"urls": s.cfg.STUNURLs})
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	servers, ttlSec, turnConfigured, err := s.turn.ICEServers(ctx, claims.UserID)
+	if err != nil {
+		log.Printf("ice provider error user=%d: %v", claims.UserID, err)
+		writeJSON(w, 503, map[string]any{
+			"error":           "turn_provider_unavailable",
+			"message":         err.Error(),
+			"turn_configured": false,
+		})
+		return
 	}
-	ttl := s.cfg.TURNCredTTL
-	if len(s.cfg.TURNURLs) > 0 {
-		e := map[string]any{"urls": s.cfg.TURNURLs}
-		if s.cfg.TURNSharedSecret != "" {
-			e["username"], e["credential"] = auth.TURNCredential(s.cfg.TURNSharedSecret, claims.UserID, ttl, time.Now())
-		} else {
-			e["username"], e["credential"] = s.cfg.TURNStaticUser, s.cfg.TURNStaticPass
-		}
-		servers = append(servers, e)
-	}
-	writeJSON(w, 200, map[string]any{"iceServers": servers, "ttl_seconds": int(ttl.Seconds()), "turn_configured": len(s.cfg.TURNURLs) > 0})
+	writeJSON(w, 200, map[string]any{
+		"iceServers":      servers,
+		"ttl_seconds":     ttlSec,
+		"turn_configured": turnConfigured,
+	})
 }
 
 func tokenFromProtocols(r *http.Request) string {

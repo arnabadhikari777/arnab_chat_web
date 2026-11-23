@@ -19,5 +19,17 @@ services:
         sync: false
       - key: TURN_SHARED_SECRET
         sync: false
+      - key: TURN_STATIC_USERNAME
+        sync: false
+      - key: TURN_STATIC_PASSWORD
+        sync: false
+      - key: TURNIX_API_TOKEN
+        sync: false       # optional; Turnix bearer token (Render only)
+      - key: ADMIN_PASSWORD
+        sync: false       # optional; enables /admin TURN provider panel
+      - key: ACTIVE_TURN_PROVIDER
+        value: metered
+      - key: TURN_CONFIG_PATH
+        value: /tmp/goppo-turn-config.json
       - key: REQUIRE_NATIVE
         value: "true"
