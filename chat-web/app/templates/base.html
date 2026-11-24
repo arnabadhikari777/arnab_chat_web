@@ -27,10 +27,12 @@
   {% block app %}{% endblock %}
   </div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='js/platform.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
   {% if current_user.is_authenticated %}<script src="{{ url_for('static', filename='js/badge.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/push.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/calling.js') }}" defer></script>{% endif %}
+  <script src="{{ url_for('static', filename='js/calling.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/device.js') }}" defer></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

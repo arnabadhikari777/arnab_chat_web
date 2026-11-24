@@ -20,6 +20,7 @@
       || window.navigator.standalone === true;
   }
   function apiSupported() {
+    if (window.GoppoPlatform && !window.GoppoPlatform.webPushAllowed()) return false;   // inside the Android app native push replaces Web Push
     return "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
   }
   function permissionState() {

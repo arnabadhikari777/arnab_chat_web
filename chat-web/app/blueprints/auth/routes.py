@@ -198,6 +198,11 @@ def logout():
             push_service.forget_session_subscription(current_user, session.get("push_sub_id"))
         except Exception:  # noqa: BLE001
             current_app.logger.exception("could not remove push subscription on logout")
+        try:
+            from ...services import device_service
+            device_service.forget_session_device(current_user, session.get("native_device_id"))
+        except Exception:  # noqa: BLE001
+            current_app.logger.exception("could not remove native device on logout")
     logout_user()
     keep = {k: session[k] for k in ("lang",) if k in session}
     session.clear()                      # nothing of the old session survives a logout

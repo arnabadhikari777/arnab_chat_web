@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="goppo_brand">#0B6E78</color>
+    <color name="goppo_brand_dark">#085A63</color>
+    <color name="goppo_accent">#26A69A</color>
+    <color name="colorPrimary">@color/goppo_brand</color>
+    <color name="colorPrimaryDark">@color/goppo_brand_dark</color>
+    <color name="colorAccent">@color/goppo_accent</color>
+</resources>

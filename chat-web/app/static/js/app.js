@@ -126,7 +126,12 @@
     });
   }
 
-  window.app = { fmtTime, fmtDay, fmtStamp, lastSeen, sameDay, api, toast, confirmDialog, t, ready };
+  /* ---- connection lost / back: one short notice on every page (the chat screen keeps its own banner too) ---- */
+  let wasOffline = false;
+  window.addEventListener("offline", () => { wasOffline = true; ready.then(() => toast(t("toast.offline"), "error")); });
+  window.addEventListener("online", () => { if (wasOffline) { wasOffline = false; ready.then(() => toast(t("toast.back_online"))); } });
+
+  window.app = { platform: window.GoppoPlatform || null, fmtTime, fmtDay, fmtStamp, lastSeen, sameDay, api, toast, confirmDialog, t, ready };
 })();
 
 

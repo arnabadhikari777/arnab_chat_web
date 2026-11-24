@@ -30,6 +30,8 @@
   "empty.notices.title": "No notices",
   "empty.notices.text": "New updates will show up here.",
   "toast.network_error": "No internet connection. Please try again.",
+  "toast.offline": "You are offline. Some things may not work.",
+  "toast.back_online": "Back online.",
   "toast.something_wrong": "Something went wrong. Please try again.",
   "dialog.delete_message.title": "Delete this message?",
   "dialog.delete_message.text": "You can delete it for yourself or for everyone.",

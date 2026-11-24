@@ -66,7 +66,7 @@ python tools/db_restore.py backups/<file>.db --yes     # restore (saves the curr
 ```
 
 ## Database changes
-The migration history is **one straight line** (head `c3d5e7f9a1b2`). Every migration checks what already exists before
+The migration history is **one straight line** (head `d4f6a8c0e2b3`). Every migration checks what already exists before
 adding it, so it is safe on fresh and on existing databases. Rules for new migrations: one head only
 (`flask db heads` must print one line), additive and guarded, never drop user data.
 ```bash

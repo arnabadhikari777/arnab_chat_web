@@ -1,0 +1,23 @@
+{
+  "name": "goppo-chat-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Goppo Chat Android shell (Capacitor 7). Loads the live website; no bundled copy of the site.",
+  "scripts": {
+    "prepare:bridge": "node scripts/build-bridge.mjs",
+    "verify:bridge": "node scripts/verify-bridge.mjs",
+    "verify:config": "node scripts/verify-config.mjs",
+    "sync": "cap sync android && node scripts/build-bridge.mjs",
+    "test": "npm run verify:config && npm run verify:bridge"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.10",
+    "@capacitor/core": "7.6.10"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

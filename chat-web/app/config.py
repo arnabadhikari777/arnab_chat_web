@@ -180,6 +180,13 @@ class Config:
     PUSH_ENDPOINT_CHECK_DNS = env_bool("PUSH_ENDPOINT_CHECK_DNS", True)
     PUSH_ANNOUNCEMENT_INLINE_LIMIT = env_int("PUSH_ANNOUNCEMENT_INLINE_LIMIT", 40)
 
+    # ---- Native Android app (Phase 1: registration only, nothing is sent yet) ----
+    # NATIVE_DEVICES_ENABLED=0 closes the /api/devices registration API. NATIVE_PUSH_DELIVERY is reported to the app
+    # (GET /api/devices/config) so it knows whether to expect native push; it stays 0 until Phase 3 adds FCM sending.
+    NATIVE_DEVICES_ENABLED = env_bool("NATIVE_DEVICES_ENABLED", True)
+    NATIVE_PUSH_DELIVERY = env_bool("NATIVE_PUSH_DELIVERY", False)
+    NATIVE_MAX_DEVICES_PER_USER = env_int("NATIVE_MAX_DEVICES_PER_USER", 5)
+
     # ---- Voice / Video Calling (Render signaling server) ----
     CALLING_SERVER_URL = env_str("CALLING_SERVER_URL")  # e.g. https://goppo-calling.onrender.com
     CALLING_HMAC_SECRET = env_str("CALLING_HMAC_SECRET")  # shared with Render; long random string

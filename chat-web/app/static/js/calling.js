@@ -21,6 +21,10 @@
   const pad = (n) => String(n).padStart(2, "0");
   const fmt = (sec) => pad(Math.floor(sec / 60)) + ":" + pad(sec % 60);
 
+  // Platform adapter (platform.js). Optional: the calling client works unchanged without it (plain browser, tests).
+  const platform = () => window.GoppoPlatform || null;
+  const notifyNative = (name, detail) => { try { const p = platform(); if (p) p.emit(name, detail); } catch (e) {} };
+
   const S = {
     cfg: null,            // /api/calling/config
     call: null,           // the one live call (null = idle)
@@ -187,6 +191,7 @@
 
   async function getMedia(type, facing) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error("unsupported"), { name: "SecurityError" });
+    try { const p = platform(); if (p) await p.prepareMediaPermissions({ audio: true, video: type === "video" }); } catch (e) {}
     const constraints = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } };
     if (type === "video") constraints.video = { facingMode: facing || "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } };
     return navigator.mediaDevices.getUserMedia(constraints);
@@ -521,6 +526,7 @@
         screen("active", { status: "Connected" });
         startTimer(call); startStats(call);
         api("/status", { body: { call_id: call.callId, status: "connected" } });
+        notifyNative("call:connected", { call_id: call.callId, call_type: call.type, role: call.role });
       } else status("Connected");
     } else if (st === "failed") {
       if (call.role === "caller" && !call.restarting) { call.restarting = true; status("Reconnecting…"); makeOffer(call, true).finally(() => setTimeout(() => { call.restarting = false; }, 5000)); }
@@ -550,6 +556,7 @@
     const c = S.call; if (!c || !c.stream) return;
     const t = c.stream.getAudioTracks()[0]; if (!t) return;
     t.enabled = !t.enabled;
+    notifyNative("call:muted-changed", { call_id: c.callId, muted: !t.enabled });
     $("goppo-btn-mute").setAttribute("aria-pressed", String(!t.enabled));
     $("goppo-btn-mute").textContent = t.enabled ? "🎤" : "🔇";
     $("goppo-btn-mute").setAttribute("aria-label", t.enabled ? "Mute microphone" : "Unmute microphone");
@@ -667,6 +674,7 @@
     const duration = call.connectedAt ? Math.floor((Date.now() - call.connectedAt) / 1000) : 0;
     teardown(call);
     call.endShown = true;
+    notifyNative("call:ended", { call_id: call.callId, status: finalStatus, duration_seconds: duration, role: call.role });
     if (silent) { S.call = null; closeOverlay(); return; }
     screen("ended", { status: text || "Call ended." });
     const t = $("goppo-call-timer"); if (t) { t.hidden = !duration; t.textContent = fmt(duration); }
@@ -690,7 +698,10 @@
     S.call = { role: "callee", type: info.call_type, callId: info.call_id, convId: info.conversation_id, peer: info.caller || {}, peerId: (info.caller || {}).id,
       lastSeq: 0, outbox: new Map(), pendingIce: [], reconnects: 0, state: "incoming", abort: new AbortController(), facing: "user", ended: false };
     screen("incoming", { status: (info.call_type === "video" ? "Incoming video call" : "Incoming voice call"), spinner: false });
-    startRing("incoming");
+    const nativeRings = platform() && platform().has("nativeIncomingCall");     // the Android app plays its own ringtone
+    if (!nativeRings) startRing("incoming");
+    notifyNative("call:incoming", { call_id: info.call_id, call_type: info.call_type, conversation_id: info.conversation_id,
+      caller: { id: (info.caller || {}).id, full_name: (info.caller || {}).full_name }, seconds_left: info.seconds_left || 60 });
     S.call.expireTimer = setTimeout(() => {
       const c = S.call;
       if (c && c.callId === info.call_id && c.state === "incoming") { stopRing(); toast("Missed call from " + (c.peer.full_name || "")); S.call = null; closeOverlay(); }
@@ -755,6 +766,41 @@
     $("goppo-voice-btn").addEventListener("click", () => start(peerId, "voice", info));
     $("goppo-video-btn").addEventListener("click", () => start(peerId, "video", info));
   }
+
+  // ------------------------------------------------------------------ commands from a future native layer
+  // The native layer only ever calls the same functions the on-screen buttons call. Every command is validated against the
+  // live call, so a stale or repeated command (double tap, late notification action) can never affect another call.
+  async function nativeAccept(d) {
+    if (!S.call || S.call.callId !== d.call_id) {
+      if (S.call) return { ok: false, reason: "busy" };
+      const r = await api("/incoming");
+      if (!(r.ok && r.data.call && r.data.call.call_id === d.call_id)) return { ok: false, reason: "not_ringing" };
+      showIncoming(r.data.call);
+    }
+    if (!S.call || S.call.callId !== d.call_id || S.call.state !== "incoming") return { ok: false, reason: "bad_state" };
+    acceptIncoming();
+    return { ok: true };
+  }
+  async function nativeReject(d) {
+    if (S.call && S.call.callId === d.call_id && S.call.state === "incoming") { await rejectIncoming(); return { ok: true }; }
+    if (S.call || !d.call_id) return { ok: false, reason: "bad_state" };
+    const r = await api("/status", { body: { call_id: d.call_id, status: "rejected" } });     // the server decides if it is still valid
+    return { ok: r.ok };
+  }
+  function registerNativeCommands() {
+    const p = platform(); if (!p) return;
+    p.handle("call:accept", nativeAccept);
+    p.handle("call:reject", nativeReject);
+    p.handle("call:hangup", async (d) => { const c = S.call; if (!c || (d.call_id && c.callId !== d.call_id)) return { ok: false, reason: "no_call" }; await hangup(); return { ok: true }; });
+    p.handle("call:set-muted", (d) => {
+      const c = S.call; const t = c && c.stream && c.stream.getAudioTracks()[0];
+      if (!t) return { ok: false, reason: "no_call" };
+      if (t.enabled === !!d.muted) toggleMute();               // only toggle when the state really differs
+      return { ok: true, muted: !t.enabled };
+    });
+    p.handle("call:audio-output-changed", (d) => { if (S.call) S.call.audioOutput = String(d.output || ""); return { ok: true }; });
+  }
+  registerNativeCommands();
 
   // ------------------------------------------------------------------ wiring
   window.addEventListener("goppo:incoming-call", (ev) => { if (ev.detail) showIncoming(ev.detail); });

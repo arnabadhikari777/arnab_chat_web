@@ -1,4 +1,4 @@
-> **Historic report from an earlier repair phase.** The current migration head is `c3d5e7f9a1b2` (chain: …→ `a9f0c3d7b1e2` → `b2c4e6f8a1d3` → `c3d5e7f9a1b2`). Current test status: `../docs/TESTING_REPORT.md`.
+> **Historic report from an earlier repair phase.** The current migration head is `d4f6a8c0e2b3` (chain: …→ `b2c4e6f8a1d3` → `c3d5e7f9a1b2` → `d4f6a8c0e2b3`). Current test status: `../docs/TESTING_REPORT.md`.
 
 > **CORRECTION (2026-11-16 repair).** This report, written earlier, said the files `c7e1a5d3f2b8`, `d2a9b4e6f1c7` and
 > `e5b3c8a1d7f4` had been *removed* and the history made linear. **That was not true of the delivered ZIP**: all three files were

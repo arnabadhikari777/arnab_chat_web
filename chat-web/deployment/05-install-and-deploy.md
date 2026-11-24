@@ -66,10 +66,10 @@ flask push-status           # only if you use notifications
 ## Step 7 – Migration check, then migrate
 
 ```bash
-flask db heads              # exactly one line: c3d5e7f9a1b2 (head)
+flask db heads              # exactly one line: d4f6a8c0e2b3 (head)
 flask db current            # note it
 flask db upgrade
-flask db current            # c3d5e7f9a1b2 (head)
+flask db current            # d4f6a8c0e2b3 (head)
 python tools/db_inspect.py  # RESULT: schema is complete and stamped at the current head.
 ```
 

@@ -12,6 +12,7 @@ from .system import (
 from .user import User
 from .push import PushSubscription, PushDelivery
 from .call import CallHistory
+from .device import NativeDevice
 
 __all__ = [
     "User",
@@ -31,4 +32,5 @@ __all__ = [
     "PushSubscription",
     "PushDelivery",
     "CallHistory",
+    "NativeDevice",
 ]

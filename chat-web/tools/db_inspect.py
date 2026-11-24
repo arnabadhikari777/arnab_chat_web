@@ -17,7 +17,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-HEAD = "c3d5e7f9a1b2"
+HEAD = "d4f6a8c0e2b3"
 ROOT = Path(__file__).resolve().parent.parent
 
 EXPECTED = {
@@ -163,6 +163,23 @@ EXPECTED = {
         "accepted_at",
         "ended_by_id",
         "end_reason",
+        "created_at",
+        "updated_at"
+    ],
+    "native_devices": [
+        "id",
+        "user_id",
+        "platform",
+        "device_id",
+        "push_token",
+        "token_hash",
+        "app_version",
+        "os_version",
+        "device_model",
+        "status",
+        "failure_count",
+        "last_seen_at",
+        "last_success_at",
         "created_at",
         "updated_at"
     ],

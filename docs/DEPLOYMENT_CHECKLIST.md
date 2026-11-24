@@ -2,7 +2,7 @@
 
 **A. Prepare secrets** — generate one `CALLING_HMAC_SECRET` (≥32 chars). Decide TURN (provider/coturn) — recommended.
 **B. Render** (`DEPLOY_RENDER.md`): push repo → Docker web service, Dockerfile `./Dockerfile`, context `.`, Health Check `/health` → set `CALLING_HMAC_SECRET`, `ALLOWED_ORIGINS`, (`TURN_URLS`, `TURN_SHARED_SECRET`) → deploy → `curl /ready` = 200, `/components` = c, c++, rust verified.
-**C. PythonAnywhere** (`DEPLOY_PYTHONANYWHERE.md`): back up DB → upload `chat-web/` → `pip install -r requirements.txt` → `.env` (`CALLING_SERVER_URL`, same `CALLING_HMAC_SECRET`) → `flask db heads` (one line `c3d5e7f9a1b2`) → `flask db upgrade` → WSGI file → static `/static/` → Reload.
+**C. PythonAnywhere** (`DEPLOY_PYTHONANYWHERE.md`): back up DB → upload `chat-web/` → `pip install -r requirements.txt` → `.env` (`CALLING_SERVER_URL`, same `CALLING_HMAC_SECRET`) → `flask db heads` (one line `d4f6a8c0e2b3`) → `flask db upgrade` → WSGI file → static `/static/` → Reload.
 **D. Smoke** — log in, header shows call icons, console has no CSP errors, `sw.js` active.
 
 ## Manual acceptance tests (not executable in the build sandbox)

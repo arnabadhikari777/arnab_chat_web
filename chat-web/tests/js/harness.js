@@ -4,6 +4,8 @@ const path = require("path");
 const { JSDOM } = require("jsdom");
 
 const SRC = fs.readFileSync(path.join(__dirname, "../../app/static/js/calling.js"), "utf8");
+const PLATFORM_SRC = fs.readFileSync(path.join(__dirname, "../../app/static/js/platform.js"), "utf8");
+const DEVICE_SRC = fs.readFileSync(path.join(__dirname, "../../app/static/js/device.js"), "utf8");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class FakeTrack { constructor(kind) { this.kind = kind; this.enabled = true; this.stopped = false; } stop() { this.stopped = true; } }
@@ -21,6 +23,7 @@ function makeEnv(opts = {}) {
     <div id="chat" data-peer="7"><header class="topbar"><div class="chat-head"><strong>Bob</strong></div></header></div></body></html>`,
     { url: "https://chat.example/messages/1", runScripts: "outside-only", pretendToBeVisual: true });
   const w = dom.window;
+  if (opts.userAgent) Object.defineProperty(w.navigator, "userAgent", { configurable: true, value: opts.userAgent });
   const env = { w, calls: [], sockets: [], pcs: [], statuses: [], ready: opts.ready || (() => ({ status: 200, body: { ready: true } })), mediaDenied: opts.mediaDenied || null };
   env.log = (m) => env.calls.push(m);
 
@@ -78,12 +81,26 @@ function makeEnv(opts = {}) {
   Object.defineProperty(w, "isSecureContext", { value: true });
   w.AudioContext = undefined;
 
+  // Optional: the Android-readiness layer (platform.js) and a fake native plugin, loaded BEFORE calling.js like in base.html.
+  env.native = { calls: [], events: [], caps: opts.nativeCaps || [], listeners: {} };
+  if (opts.capacitor) {
+    w.Capacitor = { isNativePlatform: () => true, getPlatform: () => "android", Plugins: { GoppoNative: {
+      getCapabilities: async () => ({ capabilities: env.native.caps, appVersion: "1.2.3", deviceId: "dev-fixed-0001" }),
+      notify: async (m) => { env.native.events.push(m); },
+      addListener: (n, fn) => { env.native.listeners[n] = fn; },
+      openExternal: async (a) => { env.native.calls.push(["openExternal", a]); return {}; },
+      requestMediaPermissions: async (a) => { env.native.calls.push(["requestMediaPermissions", a]); return { granted: true }; },
+      getPushToken: async () => ({ token: opts.pushToken || null }),
+    } } };
+  }
+  if (opts.platform) w.eval(PLATFORM_SRC);
   w.eval(SRC);
   env.G = w.GoppoCalling;
+  env.P = w.GoppoPlatform;
   env.$ = (id) => w.document.getElementById(id);
   env.screen = () => (env.$("goppo-call-overlay") && !env.$("goppo-call-overlay").classList.contains("hidden")) ? env.$("goppo-call-overlay").querySelector(".goppo-call-panel").dataset.screen : null;
   env.urls = () => env.calls.map((c) => c.url);
-  env.close = () => w.close();
+  env.close = () => sleep(60).then(() => w.close());   // let calling.js's start-up fetch finish first (it reads `location` afterwards)
   return env;
 }
 
@@ -93,4 +110,4 @@ async function until(fn, ms = 2000, msg = "condition") {
   throw new Error("timeout waiting for " + msg);
 }
 
-module.exports = { makeEnv, until, sleep, FakeStream, FakeTrack };
+module.exports = { DEVICE_SRC, makeEnv, until, sleep, FakeStream, FakeTrack };

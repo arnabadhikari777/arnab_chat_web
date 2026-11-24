@@ -60,7 +60,8 @@ Typical answers and what they mean:
 | `a4f8c2e1b9d0` or older | Stopped early. Many columns missing. |
 | `a9f0c3d7b1e2` | Schema reconcile applied; two calling migrations still pending: `flask db upgrade` adds `call_history` (`b2c4e6f8a1d3`) then its state columns (`c3d5e7f9a1b2`). |
 | `b2c4e6f8a1d3` | `call_history` exists; `flask db upgrade` adds four nullable columns (`c3d5e7f9a1b2`). |
-| `c3d5e7f9a1b2` | Already at the current head. |
+| `c3d5e7f9a1b2` | `flask db upgrade` adds the new, empty `native_devices` table (`d4f6a8c0e2b3`, Android app registrations; nothing else changes). |
+| `d4f6a8c0e2b3` | Already at the current head. |
 | nothing | Never stamped. Run the inspector (section 3) before anything else. |
 | `Can't locate revision identified by 'xxxx'` | The old migration files are not all present. See guide 7. |
 
@@ -98,7 +99,7 @@ PY
 
 ```bash
 ls migrations/versions/*.py | wc -l      # must print 12
-flask db heads                           # must print exactly ONE line: c3d5e7f9a1b2 (head)
+flask db heads                           # must print exactly ONE line: d4f6a8c0e2b3 (head)
 flask db branches                        # must print nothing
 flask db history | head -14              # a straight line, newest first
 ```
@@ -144,7 +145,7 @@ flask db upgrade
 ## 6. Verify (all four must be true)
 
 ```bash
-flask db current            # c3d5e7f9a1b2 (head)
+flask db current            # d4f6a8c0e2b3 (head)
 python tools/db_inspect.py  # RESULT: schema is complete and stamped at the current head.
 ```
 

@@ -18,7 +18,7 @@ from app.models import User
 
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS = str(ROOT / "migrations")
-HEAD = "c3d5e7f9a1b2"
+HEAD = "d4f6a8c0e2b3"
 
 
 def script_directory():
@@ -56,6 +56,14 @@ def versions(path):
     con = sqlite3.connect(path)
     try:
         return sorted(r[0] for r in con.execute("select version_num from alembic_version"))
+    finally:
+        con.close()
+
+
+def sqlite_tables(path):
+    con = sqlite3.connect(path)
+    try:
+        return {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
     finally:
         con.close()
 
@@ -241,3 +249,43 @@ def test_migration_graph_is_one_straight_line_ending_at_head():
     assert sum(1 for r in revs if r.down_revision is None) == 1, "exactly one base"
     assert all(not isinstance(r.down_revision, tuple) for r in revs), "no merge revisions"
     assert {r.down_revision for r in revs if r.down_revision} <= set(ids), "no missing revisions"
+
+
+# ------------------------------------------------------------------ native_devices (d4f6a8c0e2b3)
+def test_native_devices_table_is_added_without_touching_existing_data_and_is_reversible(file_db):
+    from flask_migrate import downgrade
+
+    upgrade(directory=MIGRATIONS, revision="c3d5e7f9a1b2")           # a production database as it is today
+    uid = make_alice()
+    db.session.remove()
+    assert not columns(file_db, "native_devices")
+    con = sqlite3.connect(file_db)
+    users_before = con.execute("select id, username from users").fetchall()
+    push_cols_before = columns(file_db, "push_subscriptions")
+    con.close()
+
+    upgrade(directory=MIGRATIONS)
+    assert versions(file_db) == [HEAD]
+    cols = columns(file_db, "native_devices")
+    assert {"user_id", "platform", "device_id", "push_token", "token_hash", "status"} <= set(cols)
+    assert "native_devices" in sqlite_tables(file_db)
+    con = sqlite3.connect(file_db)
+    try:
+        assert con.execute("select id, username from users").fetchall() == users_before
+        con.execute("insert into native_devices(user_id, platform, device_id, status, failure_count, created_at, updated_at) "
+                    "values (?, 'android', 'dev-abcdefgh', 'active', 0, '2026-01-01', '2026-01-01')", (uid,))
+        con.commit()
+        with pytest.raises(sqlite3.IntegrityError):                   # one install id = one row
+            con.execute("insert into native_devices(user_id, platform, device_id, status, failure_count, created_at, updated_at) "
+                        "values (?, 'android', 'dev-abcdefgh', 'active', 0, '2026-01-01', '2026-01-01')", (uid,))
+    finally:
+        con.close()
+    assert columns(file_db, "push_subscriptions") == push_cols_before    # browser push table is untouched
+
+    downgrade(directory=MIGRATIONS, revision="c3d5e7f9a1b2")
+    assert "native_devices" not in sqlite_tables(file_db)
+    con = sqlite3.connect(file_db)
+    assert con.execute("select id, username from users").fetchall() == users_before
+    con.close()
+    upgrade(directory=MIGRATIONS)
+    assert versions(file_db) == [HEAD]

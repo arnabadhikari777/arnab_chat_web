@@ -78,10 +78,12 @@ def create_app(config_name: str | None = None) -> Flask:
     from .blueprints.admin import bp as admin_bp
     from .blueprints.notices import bp as notices_bp
     from .blueprints.calling import bp as calling_bp
+    from .blueprints.devices import bp as devices_bp
 
     app.register_blueprint(notices_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(calling_bp)
+    app.register_blueprint(devices_bp)
 
     from flask import request
     from flask_login import current_user

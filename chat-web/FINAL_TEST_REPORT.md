@@ -1,4 +1,4 @@
-> **Historic report from an earlier repair phase.** The current migration head is `c3d5e7f9a1b2` (chain: …→ `a9f0c3d7b1e2` → `b2c4e6f8a1d3` → `c3d5e7f9a1b2`). Current test status: `../docs/TESTING_REPORT.md`.
+> **Historic report from an earlier repair phase.** The current migration head is `d4f6a8c0e2b3` (chain: …→ `b2c4e6f8a1d3` → `c3d5e7f9a1b2` → `d4f6a8c0e2b3`). Current test status: `../docs/TESTING_REPORT.md`.
 
 # Goppo – final test report
 

@@ -13,8 +13,8 @@ Tick every box before you call the release done.
 
 - [ ] ZIP unpacked; `migrations/versions/` has exactly 12 files; `.env` and `instance/chat.db` still exist.
 - [ ] `pip install -r requirements.txt` finished without errors in the correct virtualenv.
-- [ ] `flask db heads` → one line `c3d5e7f9a1b2 (head)`; `flask db branches` → empty.
-- [ ] `flask db upgrade` finished without error; `flask db current` → `c3d5e7f9a1b2 (head)`.
+- [ ] `flask db heads` → one line `d4f6a8c0e2b3 (head)`; `flask db branches` → empty.
+- [ ] `flask db upgrade` finished without error; `flask db current` → `d4f6a8c0e2b3 (head)`.
 - [ ] `python tools/db_inspect.py` → "schema is complete and stamped at the current head"; row counts equal the "before" numbers.
 - [ ] WSGI file, virtualenv, source directory, static mapping, Force HTTPS checked; web app reloaded.
 

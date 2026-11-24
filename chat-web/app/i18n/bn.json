@@ -30,6 +30,8 @@
   "empty.notices.title": "কোনো নোটিশ নেই",
   "empty.notices.text": "নতুন আপডেট এখানে দেখা যাবে।",
   "toast.network_error": "ইন্টারনেট সংযোগ নেই। আবার চেষ্টা করুন।",
+  "toast.offline": "আপনি অফলাইনে আছেন। কিছু কাজ নাও করতে পারে।",
+  "toast.back_online": "আবার অনলাইনে এসেছেন।",
   "toast.something_wrong": "কিছু একটা ভুল হয়েছে। আবার চেষ্টা করুন।",
   "dialog.delete_message.title": "মেসেজটি মুছবেন?",
   "dialog.delete_message.text": "আপনি এটি শুধু নিজের জন্য, অথবা সবার জন্য মুছতে পারেন।",

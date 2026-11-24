@@ -1,0 +1,132 @@
+name: Android build
+
+# Builds the Goppo Chat Android app (Capacitor 7 + Kotlin) and uploads the APK(s) as workflow artifacts.
+#  - Debug APK: always, no secrets needed.
+#  - Release APK: only when all four signing secrets exist (see docs/ANDROID_BUILD.md). Nothing is published to Google Play.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: "Also build a signed Release APK (needs the signing secrets)"
+        type: boolean
+        default: false
+  push:
+    branches: [main, master]
+    paths:
+      - "android-app/**"
+      - ".github/workflows/android-build.yml"
+      - "chat-web/app/static/js/platform.js"
+  pull_request:
+    paths:
+      - "android-app/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android-app
+    env:
+      # Secrets are exposed only as environment variables and never echoed. Empty when not configured.
+      HAS_SIGNING: ${{ secrets.GOPPO_KEYSTORE_BASE64 != '' && secrets.GOPPO_KEYSTORE_PASSWORD != '' && secrets.GOPPO_KEY_ALIAS != '' && secrets.GOPPO_KEY_PASSWORD != '' }}
+      GOPPO_VERSION_CODE: ${{ github.run_number }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: android-app/package-lock.json
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install pinned Node dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Sync Capacitor and rebuild the bridge script
+        run: |
+          npx cap sync android
+          npm run prepare:bridge
+
+      - name: Static checks (config, security, JS bridge)
+        run: npm test
+
+      - name: Make the Gradle wrapper executable (a ZIP upload can drop the permission bit)
+        run: chmod +x android/gradlew
+
+      - name: Kotlin unit tests
+        working-directory: android-app/android
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Build Debug APK
+        working-directory: android-app/android
+        run: ./gradlew --no-daemon assembleDebug -PgoppoVersionCode=${GOPPO_VERSION_CODE} -PgoppoVersionName=1.0.${GOPPO_VERSION_CODE}
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: goppo-chat-debug-apk
+          path: android-app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Decode release keystore
+        id: keystore
+        if: ${{ env.HAS_SIGNING == 'true' && (github.event_name == 'push' || inputs.build_release) }}
+        env:
+          KEYSTORE_B64: ${{ secrets.GOPPO_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/goppo-release.jks"
+          echo "path=$RUNNER_TEMP/goppo-release.jks" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed Release APK
+        if: ${{ steps.keystore.outcome == 'success' }}
+        working-directory: android-app/android
+        env:
+          GOPPO_KEYSTORE_FILE: ${{ steps.keystore.outputs.path }}
+          GOPPO_KEYSTORE_PASSWORD: ${{ secrets.GOPPO_KEYSTORE_PASSWORD }}
+          GOPPO_KEY_ALIAS: ${{ secrets.GOPPO_KEY_ALIAS }}
+          GOPPO_KEY_PASSWORD: ${{ secrets.GOPPO_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease -PgoppoVersionCode=${GOPPO_VERSION_CODE} -PgoppoVersionName=1.0.${GOPPO_VERSION_CODE}
+
+      - name: Upload Release APK
+        if: ${{ steps.keystore.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: goppo-chat-release-apk
+          path: android-app/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove keystore
+        if: ${{ always() && steps.keystore.outputs.path != '' }}
+        run: rm -f "${{ steps.keystore.outputs.path }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Goppo Chat Android build"
+            echo "- Debug APK artifact: goppo-chat-debug-apk"
+            if [ "${{ steps.keystore.outcome }}" = "success" ]; then echo "- Release APK artifact: goppo-chat-release-apk (signed)"; else echo "- Release APK: skipped (signing secrets not set, or not requested)"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

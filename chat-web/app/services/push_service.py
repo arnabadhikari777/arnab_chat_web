@@ -170,6 +170,19 @@ def _build_payload(note: Notification, user: User | None = None, sub: PushSubscr
     return payload
 
 
+def build_native_payload(note: Notification, user: User | None = None) -> dict[str, Any]:
+    """The DATA-ONLY payload a future native (FCM) sender will deliver to the Android app (Phase 3).
+
+    Same contract as the Web Push payload: same ``tag`` / ``notification_id`` (so the app can drop a notification
+    it already showed through another channel), same signed ``ack`` receipt (accepted by POST /api/push/ack), and
+    never any private message text. It carries no device token and no secret. Nothing sends it in Phase 1.
+    """
+    payload = _build_payload(note, user, None)
+    for web_only in ("renotify",):
+        payload.pop(web_only, None)
+    return payload
+
+
 # ------------------------------------------------------------------ device receipt (drives the double tick)
 _ACK_SALT = "goppo-push-ack-v1"
 

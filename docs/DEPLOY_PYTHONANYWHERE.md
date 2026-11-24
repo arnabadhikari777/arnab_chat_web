@@ -42,16 +42,16 @@ Copy `chat-web/.env.example` to **`~/arnab_chat_web/.env`** (same folder as `wsg
 
 Every variable the app reads is listed in `.env.example` (a test enforces this). Variables that exist only on Render are **not** here (`ALLOWED_ORIGINS`, `TURN_*`, `STUN_URLS`, `REQUIRE_NATIVE`, …).
 
-## 4. Database migration (one valid head: `c3d5e7f9a1b2`)
+## 4. Database migration (one valid head: `d4f6a8c0e2b3`)
 ```bash
 cd ~/arnab_chat_web && workon goppo-env
 export FLASK_APP=run.py
-flask db heads        # must print exactly one line:  c3d5e7f9a1b2 (head)
+flask db heads        # must print exactly one line:  d4f6a8c0e2b3 (head)
 flask db upgrade      # fresh DB: creates everything; existing DB: only adds what is missing (additive, no data loss)
-flask db current      # c3d5e7f9a1b2 (head)
+flask db current      # d4f6a8c0e2b3 (head)
 python tools/db_inspect.py     # read-only check: revision, tables, row counts
 ```
-Chain: `768997e88532 → 1b0f7999dbc9 → 9c1d2e3f4a5b → a4f8c2e1b9d0 → b7e3d1a2c4f6 → c7e1a5d3f2b8 → c9a1e5f7b2d3 → d2a9b4e6f1c7 → d3b8f2a6c1e4 → e5b3c8a1d7f4 → f1a2b3c4d5e6 → a9f0c3d7b1e2 → b2c4e6f8a1d3 → c3d5e7f9a1b2`.
+Chain: `768997e88532 → 1b0f7999dbc9 → 9c1d2e3f4a5b → a4f8c2e1b9d0 → b7e3d1a2c4f6 → c7e1a5d3f2b8 → c9a1e5f7b2d3 → d2a9b4e6f1c7 → d3b8f2a6c1e4 → e5b3c8a1d7f4 → f1a2b3c4d5e6 → a9f0c3d7b1e2 → b2c4e6f8a1d3 → c3d5e7f9a1b2 → d4f6a8c0e2b3`.
 Existing users, messages and call records are preserved (tested on a copy of a pre-calling database with a call record).
 
 ## 5. WSGI file (Web tab → WSGI configuration file) — replace everything with:
