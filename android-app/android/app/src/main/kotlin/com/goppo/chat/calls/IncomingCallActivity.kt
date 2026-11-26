@@ -64,10 +64,10 @@ class IncomingCallActivity : Activity() {
         if (intent.getBooleanExtra(EXTRA_AUTO_ACCEPT, false)) accept()               // the "Answer" button of the notification
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent?.getBooleanExtra(EXTRA_AUTO_ACCEPT, false) == true) accept()
+        if (intent.getBooleanExtra(EXTRA_AUTO_ACCEPT, false)) accept()
     }
 
     override fun onDestroy() {

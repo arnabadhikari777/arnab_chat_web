@@ -205,8 +205,9 @@ class MainActivity : BridgeActivity() {
         super.onStop()
     }
 
-    override fun onNewIntent(intent: android.content.Intent?) {
+    override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         // A notification was tapped / a call was accepted while the app is already running.
         openUrlFrom(intent)?.let { url -> bridge?.webView?.takeIf { it.url != url }?.loadUrl(url) }
         CommandBus.drain()
