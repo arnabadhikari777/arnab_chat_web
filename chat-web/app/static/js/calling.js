@@ -94,6 +94,7 @@
           <button type="button" class="goppo-call-btn" id="goppo-btn-mute" aria-label="Mute microphone" aria-pressed="false">🎤</button>
           <button type="button" class="goppo-call-btn" id="goppo-btn-cam" aria-label="Turn camera off" aria-pressed="false">📷</button>
           <button type="button" class="goppo-call-btn" id="goppo-btn-flip" aria-label="Switch camera">🔄</button>
+          <button type="button" class="goppo-call-btn" id="goppo-btn-audio" aria-label="Audio output" hidden>🔊</button>
           <button type="button" class="goppo-call-btn" id="goppo-btn-full" aria-label="Full screen">⛶</button>
           <button type="button" class="goppo-call-btn goppo-call-btn--end" id="goppo-btn-end" aria-label="End call">📵</button>
         </div>
@@ -112,6 +113,7 @@
     $("goppo-btn-cam").addEventListener("click", toggleCamera);
     $("goppo-btn-flip").addEventListener("click", flipCamera);
     $("goppo-btn-full").addEventListener("click", toggleFullscreen);
+    $("goppo-btn-audio").addEventListener("click", cycleAudio);
     $("goppo-btn-end").addEventListener("click", () => hangup("user"));
     $("goppo-btn-accept").addEventListener("click", acceptIncoming);
     $("goppo-btn-reject").addEventListener("click", rejectIncoming);
@@ -142,7 +144,33 @@
     $("goppo-btn-cam").hidden = !(c && c.type === "video");
     $("goppo-btn-flip").hidden = !(c && c.type === "video" && opts.canFlip !== false);
     if (opts.status !== undefined) status(opts.status);
+    renderAudio();
   }
+
+  /* ---- Android audio output (earpiece / speaker / Bluetooth / headset): only inside the app, only during a call ---- */
+  const AUDIO_ICON = { earpiece: "📞", speaker: "🔊", bluetooth: "🎧", wired_headset: "🎧", other: "🔈" };
+  const AUDIO_LABEL = { earpiece: "call.audio_earpiece", speaker: "call.audio_speaker", bluetooth: "call.audio_bluetooth", wired_headset: "call.audio_wired_headset" };
+  function renderAudio() {
+    const b = $("goppo-btn-audio"); const pl = platform();
+    if (!b) return;
+    const st = pl && pl.audio && pl.audio.available() ? pl.audio.state() : null;
+    const show = !!(st && S.call && S.call.state === "connected" && st.devices.length > 1);
+    b.hidden = !show;
+    if (!show) return;
+    const cur = st.devices.find((d) => d.id === st.selected) || st.devices[0];
+    b.textContent = AUDIO_ICON[cur.type] || AUDIO_ICON.other;
+    const name = (window.app && window.app.t && AUDIO_LABEL[cur.type] && window.app.t(AUDIO_LABEL[cur.type])) || cur.name;
+    b.setAttribute("aria-label", ((window.app && window.app.t && window.app.t("call.audio_route")) || "Audio output") + ": " + name);
+    b.title = b.getAttribute("aria-label");
+  }
+  function cycleAudio() {
+    const pl = platform(); if (!pl || !pl.audio) return;
+    const st = pl.audio.state(); if (st.devices.length < 2) return;
+    const i = st.devices.findIndex((d) => d.id === st.selected);
+    pl.audio.select(st.devices[(i + 1) % st.devices.length].id);
+  }
+  window.addEventListener("goppo:audio", renderAudio);
+  window.addEventListener("goppo:native-call-incoming", () => { if (typeof pollIncoming === "function") pollIncoming(); });
 
   function status(text) { const e = $("goppo-call-status"); if (e) e.textContent = text; if (S.call) S.call.statusText = text; }
   function hint(text) { const e = $("goppo-call-hint"); if (!e) return; e.textContent = text || ""; e.hidden = !text; }
@@ -525,8 +553,10 @@
         call.state = "connected"; call.connectedAt = Date.now();
         screen("active", { status: "Connected" });
         startTimer(call); startStats(call);
+        if (platform() && platform().audio && platform().audio.available()) setTimeout(() => platform().audio.refresh().then(renderAudio), 800);
         api("/status", { body: { call_id: call.callId, status: "connected" } });
-        notifyNative("call:connected", { call_id: call.callId, call_type: call.type, role: call.role });
+        notifyNative("call:connected", { call_id: call.callId, call_type: call.type, role: call.role, conversation_id: call.convId,
+          peer: { id: call.peerId, full_name: (call.peer || {}).full_name, avatar_url: (call.peer || {}).avatar_url } });
       } else status("Connected");
     } else if (st === "failed") {
       if (call.role === "caller" && !call.restarting) { call.restarting = true; status("Reconnecting…"); makeOffer(call, true).finally(() => setTimeout(() => { call.restarting = false; }, 5000)); }
@@ -701,7 +731,7 @@
     const nativeRings = platform() && platform().has("nativeIncomingCall");     // the Android app plays its own ringtone
     if (!nativeRings) startRing("incoming");
     notifyNative("call:incoming", { call_id: info.call_id, call_type: info.call_type, conversation_id: info.conversation_id,
-      caller: { id: (info.caller || {}).id, full_name: (info.caller || {}).full_name }, seconds_left: info.seconds_left || 60 });
+      caller: { id: (info.caller || {}).id, full_name: (info.caller || {}).full_name, avatar_url: (info.caller || {}).avatar_url }, seconds_left: info.seconds_left || 60 });
     S.call.expireTimer = setTimeout(() => {
       const c = S.call;
       if (c && c.callId === info.call_id && c.state === "incoming") { stopRing(); toast("Missed call from " + (c.peer.full_name || "")); S.call = null; closeOverlay(); }

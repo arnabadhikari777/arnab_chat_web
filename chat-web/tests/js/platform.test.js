@@ -175,3 +175,90 @@ test("device.js registers the token with session+CSRF API, rotates with PATCH, a
   b.w.document.body.dataset.auth = "1"; b.w.eval(DEVICE_SRC);
   assert.equal(b.w.GoppoDevices, undefined);
 });
+
+
+// ======================================================================= Phase 3: native events, audio, notifications
+const devices = [{ id: "earpiece", type: "earpiece", name: "Phone" }, { id: "speaker", type: "speaker", name: "Speaker" }, { id: "bluetooth:7", type: "bluetooth", name: "Buds" }];
+
+test("native audio events update the page state and are never echoed back to native", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["audioRouting"] }); t.after(e.close);
+  await until(() => e.P.has("audioRouting"), 1000, "capabilities");
+  const seen = []; e.w.addEventListener("goppo:audio", (ev) => seen.push(plain(ev.detail)));
+  const before = e.native.events.length;
+  await e.P.receive("audio:devicesChanged", { devices, selected: "earpiece", muted: false, backend: "telecom" });
+  await e.P.receive("audio:routeChanged", { selected: "bluetooth:7" });
+  await e.P.receive("audio:muteChanged", { muted: true });
+  const st = plain(e.P.audio.state());
+  assert.equal(st.devices.length, 3); assert.equal(st.selected, "bluetooth:7"); assert.equal(st.muted, true); assert.equal(st.backend, "telecom");
+  assert.equal(seen.length, 3);
+  assert.equal(e.native.events.length, before, "events FROM native must not be sent back TO native");
+});
+
+test("audio state ignores malformed devices and ids", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["audioRouting"] }); t.after(e.close);
+  await e.P.receive("audio:devicesChanged", { devices: [{ id: "<script>", type: "x" }, { id: "ok-1", type: "speaker" }, null, { id: "x".repeat(80), type: "x" }, { id: "n", type: 5 }], selected: "../../etc" });
+  const st = plain(e.P.audio.state());
+  assert.deepEqual(st.devices.map((d) => d.id), ["ok-1"]); assert.equal(st.selected, null);
+});
+
+test("audio API calls the plugin with plain arguments and adopts the answer", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["audioRouting"] }); t.after(e.close);
+  e.native.audio = { devices, selected: "earpiece", muted: false };
+  await until(() => e.P.has("audioRouting"), 1000, "capabilities");
+  assert.equal(e.P.audio.available(), true);
+  assert.equal(plain(await e.P.audio.refresh()).devices.length, 3);
+  assert.equal(await e.P.audio.select("speaker"), true);
+  assert.deepEqual(plain(e.native.calls.find((c) => c[0] === "selectAudioDevice")[1]), { id: "speaker" });
+  assert.equal(e.P.audio.state().selected, "speaker");
+  await e.P.audio.setSpeaker(1);
+  assert.deepEqual(plain(e.native.calls.find((c) => c[0] === "setSpeakerEnabled")[1]), { enabled: true });
+  const b = makeEnv({ platform: true }); t.after(b.close);
+  assert.equal(b.P.audio.available(), false); assert.equal(await b.P.audio.select("speaker"), false, "browser: nothing to do, no error");
+});
+
+test("notification API: status, one-time permission request, settings screens", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA }); t.after(e.close);
+  e.native.notif = { enabled: true, permission: "denied", fullScreenIntent: "denied" };
+  assert.equal(e.P.notifications.available(), true);
+  assert.equal((await e.P.notifications.status()).permission, "denied");
+  assert.equal((await e.P.notifications.request()).permission, "granted");
+  await e.P.notifications.openSettings({ channel: "calls" });
+  await e.P.notifications.openSettings({ target: "fullScreenIntent" });
+  assert.deepEqual(plain(e.native.calls.filter((c) => c[0] === "openNotificationSettings").map((c) => c[1])), [{ channel: "calls" }, { target: "fullScreenIntent" }]);
+  const b = makeEnv({ platform: true }); t.after(b.close);
+  assert.equal(b.P.notifications.available(), false); assert.equal(await b.P.notifications.status(), null);
+});
+
+test("native call events reach the page as window events; ended/rejected clear the audio state", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["audioRouting", "nativeIncomingCall"] }); t.after(e.close);
+  const got = []; ["incoming", "accepted", "rejected", "connected", "ended", "missed"].forEach((n) => e.w.addEventListener("goppo:native-call-" + n, (ev) => got.push([n, plain(ev.detail)])));
+  await e.P.receive("audio:devicesChanged", { devices, selected: "speaker" });
+  for (const n of ["incoming", "accepted", "connected", "missed"]) await e.P.receive("call:" + n, { call_id: "c1" });
+  await e.P.receive("call:ended", { call_id: "c1" });
+  assert.deepEqual(got.map((g) => g[0]), ["incoming", "accepted", "connected", "missed", "ended"]);
+  assert.equal(e.P.audio.state().devices.length, 0); assert.equal(e.P.audio.state().selected, null);
+});
+
+test("a native call:incoming makes the page look for the call at once", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["nativeIncomingCall"] }); t.after(e.close);
+  e.incoming = { call_id: "c9", call_type: "voice", conversation_id: 1, caller: { id: 7, full_name: "Bob" }, seconds_left: 50 };
+  e.w.document.body.dataset.auth = "1";
+  const before = e.calls.filter((c) => c.url === "/api/calling/incoming").length;
+  await e.P.receive("call:incoming", { call_id: "c9" });
+  await until(() => e.calls.filter((c) => c.url === "/api/calling/incoming").length > before, 1000, "poll");
+});
+
+test("incoming and connected events carry what the Android layer needs (peer, avatar, conversation)", async (t) => {
+  const e = makeEnv({ platform: true, capacitor: true, userAgent: ANDROID_UA, nativeCaps: ["nativeIncomingCall"] }); t.after(e.close);
+  e.w.dispatchEvent(new e.w.CustomEvent("goppo:incoming-call", { detail: { call_id: "c7", call_type: "video", conversation_id: 4, seconds_left: 40,
+    caller: { id: 7, full_name: "Bob", avatar_url: "https://img.example/b.jpg" } } }));
+  await until(() => e.native.events.some((m) => m.event === "call:incoming"), 1000, "incoming event");
+  const inc = e.native.events.find((m) => m.event === "call:incoming").detail;
+  assert.equal(inc.caller.avatar_url, "https://img.example/b.jpg"); assert.equal(inc.conversation_id, 4);
+  // native Accept -> the normal accept flow runs once; a second Accept is refused (one WebRTC connection)
+  const first = await e.P.receive("call:accept", { call_id: "c7" });
+  const second = await e.P.receive("call:accept", { call_id: "c7" });
+  assert.equal(first.result.ok, true); assert.equal(second.result.ok, false);
+  await sleep(60);
+  assert.ok(e.pcs.length <= 1, "never two peer connections for one call");
+});

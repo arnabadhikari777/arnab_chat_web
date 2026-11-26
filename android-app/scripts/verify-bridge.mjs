@@ -21,7 +21,9 @@ const platformJs = read(resolve(repo, "chat-web/app/static/js/platform.js"));
 const mainActivity = read(resolve(root, "android/app/src/main/kotlin/com/goppo/chat/MainActivity.kt"));
 
 // Same shape JSExport.getPluginJS() produces (addListener/removeListener have no rtype).
-const methods = ["getCapabilities", "getPushToken", "notify", "openExternal", "requestMediaPermissions", "openAppSettings", "backResult"];
+// The method list comes from the REAL plugin source (every @PluginMethod), so a new method cannot be forgotten here.
+const pluginSrc = read(resolve(root, "android/app/src/main/kotlin/com/goppo/chat/GoppoNativePlugin.kt"));
+const methods = [...pluginSrc.matchAll(/@PluginMethod\s+fun (\w+)\(/g)].map((m) => m[1]);
 const headers = [{ name: "GoppoNative", methods: [...methods.map((name) => ({ name, rtype: "promise" })), { name: "addListener" }, { name: "removeListener" }] }];
 const globalJs = "window.Capacitor = { DEBUG: false, isLoggingEnabled: false, Plugins: {} };";
 const legacyPluginJs = `(function(w){ var a=(w.Capacitor=w.Capacitor||{}); var p=(a.Plugins=a.Plugins||{}); var t=(p['GoppoNative']={});
@@ -51,6 +53,7 @@ function makeWindow({ userAgent, order }) {
   // Native side: answers Capacitor's real postMessage protocol {callbackId, pluginId, methodName, options}.
   const callbacks = {};
   const native = {
+    commandResults: [],
     capabilities: ["nativePermissions", "appLifecycle", "openExternal"],
     reply(msg, data, ok = true) {
       setTimeout(() => sandbox.androidBridge.onmessage({ data: JSON.stringify({ callbackId: msg.callbackId, pluginId: msg.pluginId, methodName: msg.methodName, success: ok, ...(ok ? { data } : { error: data }) }) }), 0);
@@ -66,6 +69,9 @@ function makeWindow({ userAgent, order }) {
         case "notify": return native.reply(msg, { ok: true });
         case "addListener": callbacks[msg.options.eventName] = msg.callbackId; return;
         case "backResult": return native.reply(msg, {});
+        case "commandResult": native.commandResults.push(msg.options); return native.reply(msg, {});
+        case "getAudioDevices": return native.reply(msg, { devices: [{ id: "earpiece", type: "earpiece", name: "Phone" }], selected: "earpiece", muted: false, backend: "telecom" });
+        case "getNotificationStatus": return native.reply(msg, { enabled: true, permission: "granted", fullScreenIntent: "granted" });
         default: return native.reply(msg, {}, false);
       }
     },
@@ -125,6 +131,37 @@ console.log("verify-bridge: real native-bridge.js + shim + real platform.js");
     assert.equal(m.options.seq, 7);
     assert.equal(m.options.answered, true);
     assert.equal(typeof m.options.consumed, "boolean");
+  });
+  await check("every @PluginMethod of the Kotlin plugin is a callable proxy method (" + methods.length + " methods)", async () => {
+    assert.ok(methods.length >= 19, "found " + methods.length);
+    for (const m of ["getPushToken", "requestNotificationPermission", "openNotificationSettings", "getAudioDevices", "selectAudioDevice", "setMicrophoneMuted",
+      "setSpeakerEnabled", "acceptIncomingCall", "rejectIncomingCall", "endCall", "getActiveCallState", "commandResult"]) {
+      assert.ok(methods.includes(m), "plugin lacks " + m);
+      assert.equal(typeof cap.Plugins.GoppoNative[m], "function", m + " is not exposed to the page");
+    }
+    const a = await cap.Plugins.GoppoNative.getAudioDevices();
+    assert.equal(a.selected, "earpiece");
+    assert.equal(w.sent.filter((x) => x.methodName === "getAudioDevices").pop().pluginId, "GoppoNative");
+  });
+  await check("MainActivity's COMMAND_SCRIPT delivers Accept to calling.js's handler, retries while the page loads, reports the answer", async () => {
+    const block = mainActivity.slice(mainActivity.indexOf("private const val COMMAND_SCRIPT"));
+    const literal = [...block.slice(0, block.indexOf("\n\n")).matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\"/g, '"')).join("");
+    const script = (id, cmd, detail) => literal.replace(/__ID__/g, String(id)).replace("__CMD__", JSON.stringify(cmd)).replace("__DETAIL__", JSON.stringify(detail));
+    let accepted = 0;
+    // handler registered LATE (calling.js still loading): the first attempts answer {handled:false}
+    setTimeout(() => w.sandbox.GoppoPlatform.handle("call:accept", (d) => { accepted++; return { ok: d.call_id === "c1" }; }), 400);
+    assert.equal(vm.runInContext(script(11, "call:accept", { call_id: "c1" }), w.ctx), "pending");
+    await tick(900);
+    const r = w.native.commandResults.find((x) => x.id === 11);
+    assert.ok(r, "no commandResult"); assert.equal(r.handled, true); assert.equal(r.ok, true); assert.equal(accepted, 1, "handler ran exactly once");
+    vm.runInContext(script(12, "call:accept", { call_id: "stale" }), w.ctx);
+    await tick(150);
+    const r2 = w.native.commandResults.find((x) => x.id === 12);
+    assert.equal(r2.handled, true); assert.equal(r2.ok, false, "the page refusing (wrong call) is reported as not ok");
+    vm.runInContext(script(13, "no:such", {}), w.ctx);
+    await tick(1500);                       // the harness shortens timers: 30 retries finish well within this
+    const r3 = w.native.commandResults.find((x) => x.id === 13);
+    assert.ok(r3 && r3.handled === false && r3.ok === false, "an unknown command ends as not handled after the retry window");
   });
   await check("device id from native is a valid server device_id", () => assert.match("11111111-2222-3333-4444-555555555555", /^[A-Za-z0-9._-]{8,64}$/));
 }

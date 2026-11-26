@@ -67,3 +67,4 @@ Phase 3: FCM sender (+ Firebase credentials in server env only), device-token fa
 
 ---
 **Phase 2 status:** the Android shell and the real `GoppoNative` plugin exist in `android-app/` (see `docs/PHASE2_REPORT.md`, `docs/ANDROID_BUILD.md`). Implemented capabilities: `nativePermissions`, `appLifecycle`, `openExternal`. Everything else in this contract is still Phase 3.
+**Phase 3 status:** `nativePush`, `nativeIncomingCall`, `nativeCallNotifications`, `nativeMessageNotifications` and `audioRouting` are now implemented in Kotlin, and each is reported only while it can really work on that phone (see `docs/PHASE3_REPORT.md`). None has been tested on a real phone yet.

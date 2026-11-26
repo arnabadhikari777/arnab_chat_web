@@ -47,6 +47,16 @@
     </form>
   </section>
 
+  <section class="stack" id="android-settings" hidden>
+    <h3>{{ t('android.title') }}</h3>
+    <p class="muted">{{ t('android.hint') }}</p>
+    <p class="field__hint hidden" data-android-status></p>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="allow">{{ t('android.allow') }}</button>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="calls">{{ t('android.calls_sound') }}</button>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="messages">{{ t('android.messages_sound') }}</button>
+    <button type="button" class="btn btn--secondary btn--block hidden" data-android-open="fullScreenIntent">{{ t('android.fullscreen') }}</button>
+  </section>
+
   <section class="stack" id="push-settings" data-state="checking">
     <h3>{{ t('push.title') }}</h3>
     <p class="muted" data-push-status>{{ t('push.checking') }}</p>

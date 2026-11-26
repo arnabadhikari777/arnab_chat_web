@@ -186,6 +186,13 @@ class Config:
     NATIVE_DEVICES_ENABLED = env_bool("NATIVE_DEVICES_ENABLED", True)
     NATIVE_PUSH_DELIVERY = env_bool("NATIVE_PUSH_DELIVERY", False)
     NATIVE_MAX_DEVICES_PER_USER = env_int("NATIVE_MAX_DEVICES_PER_USER", 5)
+    # ---- Native push through Firebase Cloud Messaging HTTP v1 (Phase 3). SERVER secret: never put it in the APK. ----
+    FCM_SERVICE_ACCOUNT_B64 = env_str("FCM_SERVICE_ACCOUNT_B64")        # base64 of the service-account JSON (preferred)
+    FCM_SERVICE_ACCOUNT_JSON = env_str("FCM_SERVICE_ACCOUNT_JSON")      # or the JSON text itself
+    FCM_SERVICE_ACCOUNT_FILE = env_str("FCM_SERVICE_ACCOUNT_FILE")      # or a path to the JSON file (chmod 600)
+    FCM_PROJECT_ID = env_str("FCM_PROJECT_ID")                          # optional: defaults to project_id in the JSON
+    FCM_MESSAGE_PRIORITY = env_str("FCM_MESSAGE_PRIORITY", "high")      # high | normal (calls are always high)
+    FCM_MAX_FAILURES = env_int("FCM_MAX_FAILURES", 10)                  # consecutive temporary failures before a token is dropped
 
     # ---- Voice / Video Calling (Render signaling server) ----
     CALLING_SERVER_URL = env_str("CALLING_SERVER_URL")  # e.g. https://goppo-calling.onrender.com

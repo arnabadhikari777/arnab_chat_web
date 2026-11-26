@@ -506,5 +506,21 @@
     }
   },
   "notice.incoming_call": "{name} is calling you",
-  "notice.missed_call": "Missed call from {name}"
+  "notice.missed_call": "Missed call from {name}",
+  "android.title": "Android app notifications",
+  "android.hint": "Calls ring with your phone's ringtone and messages use your notification sound. You can change both in your phone's Settings app.",
+  "android.allow": "Allow notifications",
+  "android.calls_sound": "Incoming call sound",
+  "android.messages_sound": "Message sound",
+  "android.fullscreen": "Show calls over the lock screen",
+  "android.ask_title": "Allow notifications?",
+  "android.ask_text": "Goppo uses notifications to ring you for calls and to tell you about new messages.",
+  "android.ask_yes": "Allow",
+  "android.status_off": "Notifications are off for Goppo.",
+  "android.status_fullscreen": "Calls will appear as a pop-up only; allow full-screen calls to see them over the lock screen.",
+  "call.audio_route": "Audio output",
+  "call.audio_earpiece": "Phone",
+  "call.audio_speaker": "Speaker",
+  "call.audio_bluetooth": "Bluetooth",
+  "call.audio_wired_headset": "Headset"
 }

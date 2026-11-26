@@ -39,11 +39,40 @@ check("Kotlin/AGP/Gradle versions pinned", () => {
   assert.match(read("android/gradle/wrapper/gradle-wrapper.properties"), /gradle-8\.11\.1-all\.zip/);
 });
 const perms = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map((m) => m[1].replace("android.permission.", "")).sort();
-check("only the Phase 2 permissions are declared", () => assert.deepEqual(perms, ["CAMERA", "INTERNET", "MODIFY_AUDIO_SETTINGS", "RECORD_AUDIO"]));
-check("manifest: HTTPS only, no backup, portrait, adjustResize, single exported activity", () => {
+check("only the documented Phase 2 + Phase 3 permissions are declared", () => assert.deepEqual(perms, [
+  "CAMERA", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_CAMERA", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_PHONE_CALL", "INTERNET",
+  "MANAGE_OWN_CALLS", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "RECORD_AUDIO", "USE_FULL_SCREEN_INTENT"]));
+check("no SMS / contacts / call-log / phone-state / location / storage / dialer permissions", () => {
+  for (const bad of ["READ_SMS", "READ_CONTACTS", "CALL_PHONE", "READ_CALL_LOG", "READ_PHONE_STATE", "ANSWER_PHONE_CALLS", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION",
+    "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "SYSTEM_ALERT_WINDOW", "BLUETOOTH_CONNECT", "RECEIVE_BOOT_COMPLETED"]) assert.ok(!perms.includes(bad), bad);
+  assert.ok(!/default.?dialer|ROLE_DIALER|InCallService/i.test(manifest));
+});
+check("Phase 3 components: services/receivers not exported; only Telecom (system-bound) and the launcher activity are", () => {
+  const exported = [...manifest.matchAll(/<(activity|service|receiver)\s[^>]*?android:name="([^"]+)"[^>]*?android:exported="true"/gs)].map((m) => m[2]).sort();
+  assert.deepEqual(exported, [".MainActivity", ".calls.GoppoConnectionService"]);
+  assert.match(manifest, /BIND_TELECOM_CONNECTION_SERVICE/);
+  assert.match(manifest, /android:foregroundServiceType="phoneCall\|microphone\|camera"/);
+  assert.match(manifest, /com\.google\.firebase\.MESSAGING_EVENT/);
+});
+check("no bundled ringtone or sound file; channels use the system defaults and are never recreated", () => {
+  const files = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); statSync(p).isDirectory() ? walk(p) : files.push(p); } };
+  walk(resolve(root, "android/app/src/main"));
+  assert.deepEqual(files.filter((f) => /\.(mp3|ogg|wav|m4a|aac|flac|opus)$/i.test(f) || /\/res\/raw\//.test(f)), []);
+  const ch = readFileSync(resolve(root, "android/app/src/main/kotlin/com/goppo/chat/notify/NotificationChannels.kt"), "utf8");
+  assert.match(ch, /RingtoneManager\.getDefaultUri\(RingtoneManager\.TYPE_RINGTONE\)/); assert.match(ch, /DEFAULT_NOTIFICATION_URI/);
+  assert.match(ch, /getNotificationChannel\(id\) == null/); assert.ok(!/deleteNotificationChannel/.test(ch));
+});
+check("Firebase: google-services.json is applied only if present and is git-ignored; no service-account key anywhere", () => {
+  assert.match(gradle, /file\('google-services\.json'\)\.exists\(\)/); assert.match(gradle, /firebase-bom/);
+  assert.match(read("android/app/.gitignore"), /google-services\.json/);
+  const hits = []; const walk = (d) => { for (const f of readdirSync(d)) { if (["node_modules", "build", ".gradle", ".git", "__pycache__"].includes(f)) continue; const p = join(d, f); const st = statSync(p);
+    if (st.isDirectory()) walk(p); else if (st.size < 400000 && /\.(kt|java|js|json|xml|py|md|yml|yaml|txt|gradle|properties|example)$/.test(f)) { const t = readFileSync(p, "utf8"); if (/-----BEGIN [A-Z ]*PRIVATE KEY-----\s*[A-Za-z0-9+\/]{20}/.test(t)) hits.push(p); } } };
+  walk(repo); assert.deepEqual(hits, []);
+});
+check("manifest: HTTPS only, no backup, portrait, adjustResize, launcher activity + Telecom service are the only exports", () => {
   assert.match(manifest, /usesCleartextTraffic="false"/); assert.match(manifest, /allowBackup="false"/);
   assert.match(manifest, /screenOrientation="portrait"/); assert.match(manifest, /windowSoftInputMode="adjustResize"/);
-  assert.equal((manifest.match(/android:exported="true"/g) || []).length, 1);
+  assert.equal((manifest.match(/android:exported="true"/g) || []).length, 2);
   assert.ok(!/android:debuggable/.test(manifest));
 });
 check("network security config: no cleartext, system CAs only, no SSL bypass", () => {
@@ -55,9 +84,10 @@ check("no SSL error bypass, no addJavascriptInterface, no blanket permission gra
   assert.ok(!/override\s+fun\s+onReceivedSslError|SslErrorHandler|\.proceed\(\)/.test(kt)); assert.ok(!/addJavascriptInterface/.test(kt));
   assert.ok(!/request\.grant\(request\.resources\)/.test(kt));
 });
-check("plugin reports no later-phase capability", () => {
-  const m = kt.match(/val IMPLEMENTED: List<String> = listOf\(([^)]*)\)/);
-  assert.ok(m); for (const bad of ["nativePush", "nativeIncomingCall", "audioRouting", "nativeCallNotifications"]) assert.ok(!m[1].includes(bad), bad);
+check("capabilities: only 3 unconditional; push/incoming-call/notification ones depend on real state", () => {
+  const m = kt.match(/val ALWAYS: List<String> = listOf\(([^)]*)\)/);
+  assert.ok(m); assert.equal(m[1].split(",").length, 3);
+  assert.match(kt, /if \(i\.firebaseOperational\) add\(NATIVE_PUSH\)/);
 });
 check("release signing comes from environment variables only; no keystore or secret in the tree", () => {
   assert.match(gradle, /System\.getenv\('GOPPO_KEYSTORE_FILE'\)/);
@@ -77,6 +107,7 @@ check("workflow exists and never prints secrets", () => {
   const wf = readFileSync(resolve(repo, ".github/workflows/android-build.yml"), "utf8");
   assert.match(wf, /workflow_dispatch/); assert.match(wf, /assembleDebug/); assert.match(wf, /upload-artifact/);
   assert.ok(!/echo\s+.*secrets\./.test(wf));
+  assert.match(wf, /GOOGLE_SERVICES_JSON_BASE64/); assert.ok(!/setup-java@v4/.test(wf));
 });
 console.log(failed ? `verify-config: ${failed} FAILED` : `verify-config: all ${n} checks passed`);
 process.exit(failed ? 1 : 0);

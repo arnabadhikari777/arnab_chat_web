@@ -75,8 +75,10 @@ def enabled() -> bool:
 
 
 def public_config() -> dict:
+    from . import fcm_service
+
     return {"enabled": enabled(), "platforms": list(PLATFORMS),
-            "push_delivery": bool(current_app.config.get("NATIVE_PUSH_DELIVERY", False)),
+            "push_delivery": fcm_service.configured(),
             "max_devices": int(current_app.config.get("NATIVE_MAX_DEVICES_PER_USER", 5))}
 
 
@@ -180,5 +182,5 @@ def list_for_user(user_id: int) -> list[NativeDevice]:
 
 
 def active_devices(user_id: int) -> list[NativeDevice]:
-    """Devices that could receive a native push (used by the Phase 3 sender)."""
+    """Devices that can receive a native push (used by fcm_service)."""
     return [d for d in list_for_user(user_id) if d.status == "active" and d.push_token]

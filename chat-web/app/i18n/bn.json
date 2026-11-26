@@ -506,5 +506,21 @@
     }
   },
   "notice.incoming_call": "{name} আপনাকে কল করছেন",
-  "notice.missed_call": "{name} এর মিসড কল"
+  "notice.missed_call": "{name} এর মিসড কল",
+  "android.title": "অ্যান্ড্রয়েড অ্যাপের নোটিফিকেশন",
+  "android.hint": "কল আপনার ফোনের রিংটোনে বাজে এবং বার্তায় আপনার নোটিফিকেশন শব্দ ব্যবহার হয়। দুটোই অ্যান্ড্রয়েডের নিজস্ব সেটিংসে বদলানো যায়।",
+  "android.allow": "নোটিফিকেশন অনুমতি দিন",
+  "android.calls_sound": "ইনকামিং কলের শব্দ",
+  "android.messages_sound": "বার্তার শব্দ",
+  "android.fullscreen": "লক স্ক্রিনে কল দেখান",
+  "android.ask_title": "নোটিফিকেশনের অনুমতি দেবেন?",
+  "android.ask_text": "কলের রিং বাজাতে এবং নতুন বার্তার খবর দিতে গপ্পো নোটিফিকেশন ব্যবহার করে।",
+  "android.ask_yes": "অনুমতি দিন",
+  "android.status_off": "গপ্পোর জন্য নোটিফিকেশন বন্ধ আছে।",
+  "android.status_fullscreen": "কল শুধু পপ-আপ হিসেবে আসবে; লক স্ক্রিনে দেখতে ফুল-স্ক্রিন কলের অনুমতি দিন।",
+  "call.audio_route": "অডিও আউটপুট",
+  "call.audio_earpiece": "ফোন",
+  "call.audio_speaker": "স্পিকার",
+  "call.audio_bluetooth": "ব্লুটুথ",
+  "call.audio_wired_headset": "হেডসেট"
 }

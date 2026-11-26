@@ -57,10 +57,10 @@
   const handlers = new Map();      // command name -> fn        (web side; one owner per command)
 
   /** Ask the native layer to do something. Never throws. {handled:false} when there is no native layer or it failed. */
-  async function nativeCall(method, args) {
+  async function nativeCall(method, args, timeoutMs) {
     const p = plugin();
     if (!p || typeof p[method] !== "function") return { handled: false };
-    try { return { handled: true, result: await withTimeout(p[method](args || {}), NATIVE_TIMEOUT_MS) }; }
+    try { return { handled: true, result: await withTimeout(p[method](args || {}), timeoutMs || NATIVE_TIMEOUT_MS) }; }
     catch (e) { return { handled: false, error: String((e && e.message) || e) }; }
   }
 
@@ -128,6 +128,53 @@
   handle("app:resume", () => { window.dispatchEvent(new CustomEvent("goppo:app-resume")); return {}; });
   handle("app:pause", () => { window.dispatchEvent(new CustomEvent("goppo:app-pause")); return {}; });
 
+  /* ---------------------------------------------------------------- native -> web events (Phase 3: informational)
+   * The Android layer tells the page what it did or what changed. They never go back to native (no emit()): the native
+   * layer is the sender. calling.js / device.js own the actual call and token handling. */
+  const audio = { devices: [], selected: null, muted: false, backend: null };
+  const audioSnapshot = () => ({ devices: audio.devices.slice(), selected: audio.selected, muted: audio.muted, backend: audio.backend });
+  const ID_OK = /^[A-Za-z0-9:_.-]{1,64}$/;
+  function setAudio(d) {
+    if (!d || typeof d !== "object") return {};
+    if (Array.isArray(d.devices)) {
+      audio.devices = d.devices.filter((x) => x && ID_OK.test(String(x.id)) && typeof x.type === "string")
+        .map((x) => ({ id: String(x.id), type: String(x.type), name: String(x.name || x.type).slice(0, 60) }));
+    }
+    if ("selected" in d) audio.selected = d.selected && ID_OK.test(String(d.selected)) ? String(d.selected) : null;
+    if (typeof d.muted === "boolean") audio.muted = d.muted;
+    if (typeof d.backend === "string") audio.backend = d.backend;
+    const snap = audioSnapshot();
+    guard(() => window.dispatchEvent(new CustomEvent("goppo:audio", { detail: snap })));
+    return snap;
+  }
+  ["audio:devicesChanged", "audio:routeChanged", "audio:muteChanged"].forEach((name) => handle(name, (d) => setAudio(d)));
+  ["call:incoming", "call:accepted", "call:rejected", "call:connected", "call:ended", "call:missed"].forEach((name) => {
+    handle(name, (d) => {
+      guard(() => window.dispatchEvent(new CustomEvent("goppo:native-" + name.replace(":", "-"), { detail: d || {} })));
+      if (name === "call:ended" || name === "call:rejected") { audio.devices = []; audio.selected = null; audio.muted = false; }
+      return {};
+    });
+  });
+
+  const audioApi = {
+    available: () => info.native && has("audioRouting"),
+    state: audioSnapshot,
+    async refresh() { const r = await nativeCall("getAudioDevices"); return r.handled ? setAudio(r.result) : audioSnapshot(); },
+    async select(id) { const r = await nativeCall("selectAudioDevice", { id: String(id) }); if (r.handled) setAudio(r.result); return r.handled; },
+    async setSpeaker(enabled) { const r = await nativeCall("setSpeakerEnabled", { enabled: !!enabled }); if (r.handled) setAudio(r.result); return r.handled; },
+    onChange(fn) { const h = (e) => fn(e.detail); window.addEventListener("goppo:audio", h); return () => window.removeEventListener("goppo:audio", h); },
+  };
+  const notifications = {
+    available: () => info.native && !!plugin() && typeof plugin().getNotificationStatus === "function",
+    async status() { const r = await nativeCall("getNotificationStatus"); return r.handled ? r.result : null; },
+    async request() { const r = await nativeCall("requestNotificationPermission", {}, 60000); return r.handled ? r.result : null; },
+    /** opts: {channel: "calls"|"messages"|"missed_calls"} or {target: "fullScreenIntent"}; none = the app's notification page. */
+    async openSettings(opts) { const r = await nativeCall("openNotificationSettings", opts || {}); return r.handled; },
+  };
+  const calls = {
+    async state() { const r = await nativeCall("getActiveCallState"); return r.handled ? r.result : { active: false }; },
+  };
+
   /** Links to other sites: the native layer may open them in the system browser; otherwise normal browser behaviour. */
   document.addEventListener("click", (e) => {
     const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
@@ -169,6 +216,7 @@
     has,
     on, emit, handle, receive,
     native: { call: nativeCall, available: () => !!plugin(), info: () => ({ ...nativeInfo }) },
+    audio: audioApi, notifications, calls,
     webPushAllowed, firstSight, prepareMediaPermissions,
     _setCapabilitiesForTests: (list) => { capabilities = new Set(list); },
   };

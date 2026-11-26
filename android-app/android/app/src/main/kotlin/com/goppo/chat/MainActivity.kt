@@ -22,6 +22,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.getcapacitor.Bridge
 import com.getcapacitor.BridgeActivity
 import com.getcapacitor.JSObject
+import com.goppo.chat.calls.CommandBus
+import com.goppo.chat.calls.NativeCallManager
+import com.goppo.chat.notify.NotificationChannels
+import com.goppo.chat.push.SitePaths
+import org.json.JSONObject
+import java.lang.ref.WeakReference
 import kotlin.math.max
 
 /**
@@ -46,6 +52,7 @@ class MainActivity : BridgeActivity() {
         val startedAt = SystemClock.uptimeMillis()
         splash.setKeepOnScreenCondition { !firstPageDone && SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS }
 
+        current = WeakReference(this)
         registerPlugin(GoppoNativePlugin::class.java)      // before super.onCreate, as Capacitor requires
         mediaPermissions = MediaPermissionRequester(this)  // registers its launcher before the activity is STARTED
         super.onCreate(savedInstanceState)
@@ -57,11 +64,14 @@ class MainActivity : BridgeActivity() {
         hardenWebView(b.webView)
 
         val policy = GoppoRuntime.configure(b.serverUrl)
+        NotificationChannels.ensure(this)                  // creates missing channels only; never touches the user's choices
+        NativeCallManager.init(this)
+        val startUrl = openUrlFrom(intent) ?: b.appUrl
         // Official GoppoNative proxy for the remote site (after Capacitor's own script), then restart the page load that
         // Capacitor already began so the very first page gets it too.
-        if (GoppoBridgeShim.install(b)) {
+        if (GoppoBridgeShim.install(b) || startUrl != b.appUrl) {
             b.webView.stopLoading()
-            b.webView.loadUrl(b.appUrl)
+            b.webView.loadUrl(startUrl)
         }
         if (policy != null) {
             b.setWebViewClient(GoppoWebViewClient(b, policy) { firstPageDone = true })
@@ -179,11 +189,40 @@ class MainActivity : BridgeActivity() {
     // ------------------------------------------------------------------ lifecycle -> website
 
     fun onWebReady() {
-        runOnUiThread { GoppoRuntime.lifecycle.onWebReady()?.let { sendCommand(it) } }
+        runOnUiThread {
+            GoppoRuntime.lifecycle.onWebReady()?.let { sendCommand(it) }
+            CommandBus.drain()                              // a queued Accept/Reject waits for the page
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        GoppoRuntime.startedActivities++
+    }
+
+    override fun onStop() {
+        GoppoRuntime.startedActivities = (GoppoRuntime.startedActivities - 1).coerceAtLeast(0)
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        // A notification was tapped / a call was accepted while the app is already running.
+        openUrlFrom(intent)?.let { url -> bridge?.webView?.takeIf { it.url != url }?.loadUrl(url) }
+        CommandBus.drain()
+    }
+
+    /** The page a notification asks for, as a full URL on the website origin, or null. Only validated site-relative paths are used. */
+    private fun openUrlFrom(intent: android.content.Intent?): String? {
+        val path = SitePaths.safe(intent?.getStringExtra(EXTRA_OPEN_PATH)) ?: return null
+        val origin = GoppoRuntime.policy?.appOriginString ?: return null
+        val url = origin + path
+        return if (GoppoRuntime.policy?.isAppOrigin(url) == true) url else null
     }
 
     override fun onResume() {
         super.onResume()
+        CommandBus.drain()
         GoppoRuntime.lifecycle.onActivityResumed()?.let { sendCommand(it) }
     }
 
@@ -195,21 +234,49 @@ class MainActivity : BridgeActivity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
+        if (current?.get() === this) current = null
         super.onDestroy()
     }
 
-    private fun sendCommand(command: String) {
+    fun sendCommand(command: String, detail: JSObject = JSObject()) {
         val plugin = bridge?.getPlugin("GoppoNative")?.instance as? GoppoNativePlugin
-        plugin?.sendCommand(command, JSObject())
+        plugin?.sendCommand(command, detail)
     }
 
-    private companion object {
-        const val BRAND_COLOR = 0xFF0B6E78.toInt()
-        const val SPLASH_MAX_MS = 8_000L
-        const val BACK_TIMEOUT_MS = 1_000L
+    /**
+     * Delivers a CommandBus command to calling.js / platform.js and reports the page's answer to GoppoNative.commandResult.
+     * GoppoPlatform.receive() answers {handled:false} until calling.js has registered its handlers, so the script retries
+     * for ~9 s (page still loading right after a cold start from a notification).
+     */
+    fun runCommand(id: Long, command: String, detail: JSONObject) {
+        val webView = bridge?.webView ?: return
+        val script = COMMAND_SCRIPT.replace("__ID__", id.toString()).replace("__CMD__", JSONObject.quote(command))
+            .replace("__DETAIL__", detail.toString())
+        webView.evaluateJavascript(script) { result -> if (result != "\"pending\"") CommandBus.result(id, handled = false, ok = false) }
+    }
+
+    companion object {
+        /** Path (site-relative) a notification wants opened. */
+        const val EXTRA_OPEN_PATH = "goppo.open_path"
+        const val EXTRA_ACCEPT_CALL = "goppo.accept_call"
+
+        @Volatile
+        var current: WeakReference<MainActivity>? = null
+            private set
+        private const val BRAND_COLOR = 0xFF0B6E78.toInt()
+        private const val SPLASH_MAX_MS = 8_000L
+        private const val BACK_TIMEOUT_MS = 1_000L
 
         /** Asks platform.js to run its `app:back` handler and reports the answer to GoppoNative.backResult. */
-        const val BACK_SCRIPT = "(function(){try{var P=window.GoppoPlatform,N=window.Capacitor&&window.Capacitor.Plugins&&" +
+        /** Delivers a command with GoppoPlatform.receive(), retrying while the page is still loading, and reports to GoppoNative.commandResult. */
+        private const val COMMAND_SCRIPT = "(function(){try{var N=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.GoppoNative;" +
+            "if(!N)return'none';var n=0;(function go(){var P=window.GoppoPlatform;" +
+            "if(P&&typeof P.receive==='function'){P.receive(__CMD__,__DETAIL__).then(function(r){" +
+            "if((r&&r.handled)||n>=30){N.commandResult({id:__ID__,handled:!!(r&&r.handled),ok:!!(r&&r.handled&&(!r.result||r.result.ok!==false))})}" +
+            "else{n++;setTimeout(go,300)}}).catch(function(){N.commandResult({id:__ID__,handled:false,ok:false})})}" +
+            "else if(n++<30){setTimeout(go,300)}else{N.commandResult({id:__ID__,handled:false,ok:false})}})();return'pending'}catch(e){return'none'}})()"
+
+        private const val BACK_SCRIPT = "(function(){try{var P=window.GoppoPlatform,N=window.Capacitor&&window.Capacitor.Plugins&&" +
             "window.Capacitor.Plugins.GoppoNative;if(!P||!N||typeof P.receive!=='function')return'none';" +
             "P.receive('app:back',{}).then(function(r){var ok=!!(r&&r.handled&&r.result);" +
             "N.backResult({seq:__SEQ__,answered:ok,consumed:ok&&!!r.result.consumed})})" +

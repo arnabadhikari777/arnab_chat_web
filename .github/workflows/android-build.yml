@@ -3,6 +3,9 @@ name: Android build
 # Builds the Goppo Chat Android app (Capacitor 7 + Kotlin) and uploads the APK(s) as workflow artifacts.
 #  - Debug APK: always, no secrets needed.
 #  - Release APK: only when all four signing secrets exist (see docs/ANDROID_BUILD.md). Nothing is published to Google Play.
+#  - Firebase (Phase 3): if the GOOGLE_SERVICES_JSON_BASE64 secret exists it is decoded into android-app/android/app/google-services.json
+#    (git-ignored) so the app can use Firebase Cloud Messaging. Without it the app still builds; native push is then reported unavailable.
+#    That file is the Android CLIENT config (not the server's service-account key, which never goes to GitHub or into the APK).
 
 on:
   workflow_dispatch:
@@ -37,28 +40,46 @@ jobs:
         working-directory: android-app
     env:
       # Secrets are exposed only as environment variables and never echoed. Empty when not configured.
+      HAS_FIREBASE: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 != '' }}
       HAS_SIGNING: ${{ secrets.GOPPO_KEYSTORE_BASE64 != '' && secrets.GOPPO_KEYSTORE_PASSWORD != '' && secrets.GOPPO_KEY_ALIAS != '' && secrets.GOPPO_KEY_PASSWORD != '' }}
       GOPPO_VERSION_CODE: ${{ github.run_number }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           packages: "platform-tools platforms;android-35 build-tools;35.0.0"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: android-app/package-lock.json
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Add Firebase client config (secret)
+        if: ${{ env.HAS_FIREBASE == 'true' }}
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -e
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+          # fail early, without printing the file, if it is not a Firebase client config for this app id
+          python3 - <<'PY'
+          import json
+          d = json.load(open("android/app/google-services.json"))
+          ids = [c["client_info"]["android_client_info"]["package_name"] for c in d.get("client", [])]
+          assert "com.goppo.chat" in ids, "google-services.json has no client for com.goppo.chat"
+          assert "private_key" not in json.dumps(d), "this looks like a service-account key; use the Android google-services.json"
+          print("google-services.json OK for com.goppo.chat")
+          PY
 
       - name: Install pinned Node dependencies
         run: npm ci --no-audit --no-fund
@@ -83,7 +104,7 @@ jobs:
         run: ./gradlew --no-daemon assembleDebug -PgoppoVersionCode=${GOPPO_VERSION_CODE} -PgoppoVersionName=1.0.${GOPPO_VERSION_CODE}
 
       - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: goppo-chat-debug-apk
           path: android-app/android/app/build/outputs/apk/debug/*.apk
@@ -111,7 +132,7 @@ jobs:
 
       - name: Upload Release APK
         if: ${{ steps.keystore.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: goppo-chat-release-apk
           path: android-app/android/app/build/outputs/apk/release/*.apk
@@ -128,5 +149,6 @@ jobs:
           {
             echo "### Goppo Chat Android build"
             echo "- Debug APK artifact: goppo-chat-debug-apk"
+            if [ "$HAS_FIREBASE" = "true" ]; then echo "- Firebase: google-services.json injected (native push available)"; else echo "- Firebase: secret GOOGLE_SERVICES_JSON_BASE64 not set, so this APK has no native push"; fi
             if [ "${{ steps.keystore.outcome }}" = "success" ]; then echo "- Release APK artifact: goppo-chat-release-apk (signed)"; else echo "- Release APK: skipped (signing secrets not set, or not requested)"; fi
           } >> "$GITHUB_STEP_SUMMARY"

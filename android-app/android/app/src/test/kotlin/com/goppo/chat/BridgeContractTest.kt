@@ -8,11 +8,19 @@ import org.junit.Test
 
 class BridgeContractTest {
 
-    @Test fun reportsOnlyImplementedCapabilities() {
-        assertEquals(setOf("nativePermissions", "appLifecycle", "openExternal"), Capabilities.IMPLEMENTED.toSet())
-        assertTrue(Capabilities.IMPLEMENTED.none { it in Capabilities.LATER_PHASES })
-        listOf("nativePush", "nativeIncomingCall", "audioRouting", "nativeCallNotifications", "nativeMessageNotifications")
-            .forEach { assertFalse(it, it in Capabilities.IMPLEMENTED) }
+    private fun caps(fb: Boolean = false, calls: Boolean = false, active: Boolean = false, msgs: Boolean = false) =
+        Capabilities.compute(Capabilities.Inputs(fb, calls, active, msgs))
+
+    @Test fun capabilitiesAreOnlyReportedWhenTheyCanReallyWork() {
+        assertEquals(listOf("nativePermissions", "appLifecycle", "openExternal", "audioRouting"), caps())
+        assertFalse("nativePush" in caps(calls = true, active = true, msgs = true))                       // no Firebase: no push
+        assertTrue("nativePush" in caps(fb = true))
+        assertFalse("nativeIncomingCall" in caps(fb = true))                                              // notifications off: the website rings itself
+        assertTrue("nativeIncomingCall" in caps(calls = true))                                            // works from the page's own call event too
+        assertFalse("nativeMessageNotifications" in caps(msgs = true))                                    // needs push as well
+        assertTrue("nativeMessageNotifications" in caps(fb = true, msgs = true))
+        assertTrue("nativeCallNotifications" in caps(active = true))
+        assertEquals(8, caps(true, true, true, true).size)
     }
 
     @Test fun notifyAcceptsOnlyKnownEvents() {

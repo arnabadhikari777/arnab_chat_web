@@ -9,6 +9,24 @@
     <!-- Normal (install-time, no prompt) permission: lets the WebView's WebRTC engine set the call audio mode. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- Phase 3. Why each one:
+         POST_NOTIFICATIONS            runtime permission on Android 13+: message / call / missed-call notifications.
+                                       Asked in context by the website (GoppoNative.requestNotificationPermission), not at app start.
+         USE_FULL_SCREEN_INTENT        show the incoming-call screen over the lock screen. Declared; on Android 14+ the user can
+                                       switch it off in Settings and the app then falls back to a heads-up notification.
+         MANAGE_OWN_CALLS              register a self-managed VoIP call with Android Telecom (and the phoneCall service type).
+                                       Not the dialer role, not CALL_PHONE, not READ_PHONE_STATE.
+         FOREGROUND_SERVICE (+_PHONE_CALL, _MICROPHONE, _CAMERA)
+                                       keep a connected call alive in the background (Android 14 needs the typed permissions).
+         VIBRATE is a normal permission added automatically for notification vibration; nothing else is requested. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+
     <!-- Devices without a camera or microphone can still install the app (chat works without them). -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -41,6 +59,43 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Incoming-call screen: over the lock screen, in its own task, never in Recents. -->
+        <activity
+            android:name=".calls.IncomingCallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+
+        <!-- Keeps a CONNECTED call alive (microphone/camera + ongoing notification). -->
+        <service
+            android:name=".calls.ActiveCallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall|microphone|camera" />
+
+        <!-- Android Telecom (self-managed). Only the system may bind it. -->
+        <service
+            android:name=".calls.GoppoConnectionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.ConnectionService" />
+            </intent-filter>
+        </service>
+
+        <receiver android:name=".calls.CallActionReceiver" android:exported="false" />
+
+        <!-- Firebase Cloud Messaging data messages (inactive unless the build contains google-services.json). -->
+        <service android:name=".push.GoppoFirebaseService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"

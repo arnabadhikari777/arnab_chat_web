@@ -378,12 +378,17 @@ def notify_after_commit(note: Notification | None, force: bool = False) -> int:
     swallowed: it must never turn a saved message into an error for the sender."""
     if note is None:
         return 0
+    accepted = 0
     try:
-        return enqueue_and_send(note, force=force)
+        accepted = enqueue_and_send(note, force=force)
     except Exception:  # noqa: BLE001
         db.session.rollback()
         log.exception("push after commit failed (notification %s)", getattr(note, "id", None))
-        return 0
+    # Native Android devices are a separate channel (own table, own credentials). Never raises.
+    from . import fcm_service
+
+    fcm_service.deliver_notification(note, force=force)
+    return accepted
 
 
 def cleanup_expired(user_id: int | None = None) -> int:

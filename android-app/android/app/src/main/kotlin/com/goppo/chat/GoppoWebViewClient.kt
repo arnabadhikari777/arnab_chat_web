@@ -8,6 +8,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.getcapacitor.Bridge
 import com.getcapacitor.BridgeWebViewClient
+import com.goppo.chat.notify.MessageNotifier
+import com.goppo.chat.push.SitePaths
 
 /**
  * Navigation guard for the main WebView.
@@ -47,6 +49,10 @@ class GoppoWebViewClient(
         super.onPageStarted(view, url, favicon)       // Capacitor clears listeners of the previous page here
         GoppoRuntime.state.onPageStarted()
         GoppoRuntime.lifecycle.onPageStarted()
+        val path = if (policy.isAppOrigin(url)) runCatching { java.net.URI(url).rawPath }.getOrNull() else null
+        GoppoRuntime.currentPath = path
+        // Opening a chat clears its notification (and the group summary when it was the last one).
+        SitePaths.conversationId(path)?.let { MessageNotifier.cancelConversation(view.context, it) }
     }
 
     override fun onPageFinished(view: WebView, url: String?) {

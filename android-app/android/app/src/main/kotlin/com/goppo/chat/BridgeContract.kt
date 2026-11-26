@@ -1,17 +1,36 @@
 package com.goppo.chat
 
-/** Capabilities the GoppoNative plugin reports. Only what Phase 2 really implements. */
+/** Which capabilities the GoppoNative plugin reports. A capability appears only when the feature can really work right now. */
 object Capabilities {
     const val NATIVE_PERMISSIONS = "nativePermissions"
     const val APP_LIFECYCLE = "appLifecycle"
     const val OPEN_EXTERNAL = "openExternal"
+    const val NATIVE_PUSH = "nativePush"
+    const val NATIVE_INCOMING_CALL = "nativeIncomingCall"
+    const val NATIVE_CALL_NOTIFICATIONS = "nativeCallNotifications"
+    const val NATIVE_MESSAGE_NOTIFICATIONS = "nativeMessageNotifications"
+    const val AUDIO_ROUTING = "audioRouting"
 
-    val IMPLEMENTED: List<String> = listOf(NATIVE_PERMISSIONS, APP_LIFECYCLE, OPEN_EXTERNAL)
+    /** Always there (Phase 2 features). */
+    val ALWAYS: List<String> = listOf(NATIVE_PERMISSIONS, APP_LIFECYCLE, OPEN_EXTERNAL)
 
-    /** Contract names that belong to later phases. They must never be reported in Phase 2. */
-    val LATER_PHASES: Set<String> = setOf(
-        "nativePush", "nativeIncomingCall", "nativeCallNotifications", "nativeMessageNotifications", "audioRouting",
+    /** What is true on this phone right now. */
+    data class Inputs(
+        val firebaseOperational: Boolean,      // google-services.json in the build AND Google Play services on the phone
+        val callsChannelUsable: Boolean,       // notifications on for the app and the Incoming Calls channel not switched off
+        val activeCallChannelUsable: Boolean,
+        val messagesChannelUsable: Boolean,
     )
+
+    fun compute(i: Inputs): List<String> = buildList {
+        addAll(ALWAYS)
+        if (i.firebaseOperational) add(NATIVE_PUSH)
+        // The website stops ringing itself when it sees this, so it must only appear when Android can really ring.
+        if (i.callsChannelUsable) add(NATIVE_INCOMING_CALL)
+        if (i.activeCallChannelUsable) add(NATIVE_CALL_NOTIFICATIONS)
+        if (i.firebaseOperational && i.messagesChannelUsable) add(NATIVE_MESSAGE_NOTIFICATIONS)
+        add(AUDIO_ROUTING)
+    }
 }
 
 /** Web -> native events accepted by `notify({event, detail})`. */

@@ -91,6 +91,14 @@ function makeEnv(opts = {}) {
       openExternal: async (a) => { env.native.calls.push(["openExternal", a]); return {}; },
       requestMediaPermissions: async (a) => { env.native.calls.push(["requestMediaPermissions", a]); return { granted: true }; },
       getPushToken: async () => ({ token: opts.pushToken || null }),
+      // Phase 3 methods
+      getAudioDevices: async () => (env.native.audio || { devices: [], selected: null, muted: false }),
+      selectAudioDevice: async (a) => { env.native.calls.push(["selectAudioDevice", a]); return { ...(env.native.audio || {}), selected: a.id }; },
+      setSpeakerEnabled: async (a) => { env.native.calls.push(["setSpeakerEnabled", a]); return env.native.audio || {}; },
+      getNotificationStatus: async () => env.native.notif || { enabled: true, permission: "granted", fullScreenIntent: "granted" },
+      requestNotificationPermission: async () => { env.native.calls.push(["requestNotificationPermission"]); return { ...(env.native.notif || {}), permission: "granted" }; },
+      openNotificationSettings: async (a) => { env.native.calls.push(["openNotificationSettings", a]); return { opened: true }; },
+      getActiveCallState: async () => ({ active: false }),
     } } };
   }
   if (opts.platform) w.eval(PLATFORM_SRC);

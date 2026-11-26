@@ -111,10 +111,11 @@ def expire_stale(user_ids: tuple[int, ...] | None = None) -> int:
     if user_ids:
         q = q.filter(or_(CallHistory.caller_id.in_(user_ids), CallHistory.receiver_id.in_(user_ids)))
     n = 0
+    missed: list[tuple[CallHistory, object]] = []
     for rec in q.all():
         if rec.status in ("initiated", "ringing") and now - rec.started_at > ring:
             _finish(rec, "missed", by=None, reason="timeout")
-            _notify_missed(rec)
+            missed.append((rec, _notify_missed(rec)))
             n += 1
         elif rec.status == "connected" and rec.answered_at and now - rec.answered_at > maxlen:
             _finish(rec, "failed", by=None, reason="max_duration")
@@ -124,20 +125,35 @@ def expire_stale(user_ids: tuple[int, ...] | None = None) -> int:
             n += 1
     if n:
         db.session.commit()
+        for rec, note in missed:                      # native phones: stop the ringing screen, show "missed call"
+            _native_call_event(rec, "missed", note)
     return n
 
 
-def _notify_missed(rec: CallHistory) -> None:
+def _native_call_event(rec: CallHistory, reason: str, note=None) -> None:
+    """Best effort, never raises: FCM to the receiver's Android phones (browser Web Push is unchanged)."""
+    try:
+        from . import fcm_service
+
+        fcm_service.deliver_call_event(rec, reason)
+        if note is not None:
+            fcm_service.deliver_notification(note)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("native call event failed")
+
+
+def _notify_missed(rec: CallHistory):
     try:
         from .notification_service import add_notification
         caller = db.session.get(User, rec.caller_id)
-        add_notification(rec.receiver_id, "missed_call",
+        return add_notification(rec.receiver_id, "missed_call",
                          {"call_id": rec.call_id, "call_type": rec.call_type, "caller_id": rec.caller_id,
                           "username": caller.username if caller else "", "full_name": caller.full_name if caller else ""},
                          link=url_for("chat.room", conversation_id=rec.conversation_id) if rec.conversation_id else None,
                          dedupe_key=f"call:{rec.call_id}:missed")
     except Exception:  # noqa: BLE001 - history must be saved even if the notice cannot be
         current_app.logger.exception("missed-call notice failed")
+        return None
 
 
 def active_call_for(user_id: int) -> CallHistory | None:
@@ -232,6 +248,7 @@ def accept_call(user: User, call_id: str) -> dict:
     if rec.accepted_at is None:
         rec.accepted_at = utcnow()
         db.session.commit()
+        _native_call_event(rec, "answered_elsewhere")     # the accepting phone ignores it; the user's other phones stop ringing
     return issue_token(user, call_id)
 
 
@@ -267,6 +284,8 @@ def update_call_status(user: User, call_id: str, status: str, *, duration_second
     else:
         _finish(rec, status, by=user.id)
     db.session.commit()
+    if status in ("cancelled", "rejected", "busy"):       # nobody should keep ringing for a call that just ended
+        _native_call_event(rec, "cancelled" if status == "cancelled" else "handled_elsewhere")
     return rec
 
 

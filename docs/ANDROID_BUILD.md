@@ -33,6 +33,15 @@ Release step is skipped and the Debug APK is still produced. Download **goppo-ch
 Nothing is committed (`*.jks` is git-ignored and checked by `npm test`); the keystore only exists on the runner during the
 job and is deleted at the end. Nothing is published to Google Play.
 
+## Firebase (native push, Phase 3)
+Native push needs the **Android client config** `google-services.json`, injected at build time from a secret. Without it the APK
+still builds and works; it just reports `nativePush = false` (no native push, calls only ring while the page is open).
+1. Firebase console → your project → *Add app → Android* → package name **`com.goppo.chat`** → download `google-services.json`.
+2. `base64 -w0 google-services.json` (macOS: `base64 -i google-services.json`) → GitHub secret **`GOOGLE_SERVICES_JSON_BASE64`**.
+3. Run the workflow. The step "Add Firebase client config" checks the file is for `com.goppo.chat` and is not a service-account key.
+The server-side **service-account key** is a different file and a different place: PythonAnywhere `.env`, never GitHub, never the APK
+(see `docs/PHASE3_REPORT.md`).
+
 ## Changing things before release
 * **Application id**: `android-app/android/app/build.gradle` → `applicationId` and `android-app/capacitor.config.json` → `appId`
   (the Kotlin package `com.goppo.chat` can stay).

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_calls">ইনকামিং কল</string>
+    <string name="channel_calls_desc">কেউ গপ্পোতে কল করলে সাধারণ ফোন কলের মতো বাজে। শব্দটি আপনার ফোনের রিংটোন; এখানে বদলানো যায়।</string>
+    <string name="channel_messages">বার্তা</string>
+    <string name="channel_messages_desc">নতুন বার্তার সতর্কতা। শব্দটি আপনার ফোনের নোটিফিকেশন শব্দ; এখানে বদলানো যায়।</string>
+    <string name="channel_missed">মিসড কল</string>
+    <string name="channel_missed_desc">যে কল ধরা হয়নি তার খবর দেয়।</string>
+    <string name="channel_active">চলমান কল</string>
+    <string name="channel_active_desc">কল চলাকালীন দেখায়, যাতে অ্যান্ড্রয়েড কলটি ব্যাকগ্রাউন্ডে চালু রাখে।</string>
+    <string name="call_incoming_voice">ইনকামিং ভয়েস কল</string>
+    <string name="call_incoming_video">ইনকামিং ভিডিও কল</string>
+    <string name="call_ongoing_voice">ভয়েস কল চলছে</string>
+    <string name="call_ongoing_video">ভিডিও কল চলছে</string>
+    <string name="call_missed_voice">মিসড ভয়েস কল</string>
+    <string name="call_missed_video">মিসড ভিডিও কল</string>
+    <string name="call_missed_public">মিসড কল</string>
+    <string name="call_accept">গ্রহণ</string>
+    <string name="call_decline">প্রত্যাখ্যান</string>
+    <string name="call_mute">মিউট</string>
+    <string name="call_unmute">আনমিউট</string>
+    <string name="call_ringing_seconds">বাজছে… %1$d সে.</string>
+    <string name="call_already_ended">এই কলটি ইতিমধ্যে শেষ হয়েছে।</string>
+    <string name="call_signed_out">কল ধরতে অনুগ্রহ করে সাইন ইন করুন।</string>
+    <string name="msg_one">নতুন বার্তা</string>
+    <string name="msg_many">%1$d টি নতুন বার্তা</string>
+    <string name="msg_public">নতুন বার্তা</string>
+    <string name="you">আপনি</string>
+</resources>

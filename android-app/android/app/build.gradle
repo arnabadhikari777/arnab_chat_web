@@ -1,6 +1,13 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+// Firebase: the Android client config (google-services.json) is injected at build time from a GitHub secret and is never
+// committed. Without it the app still builds; native push is simply reported as unavailable (nativePush = false).
+def hasFirebaseConfig = file('google-services.json').exists()
+if (hasFirebaseConfig) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 // Version comes from the CI run number (-PgoppoVersionCode / -PgoppoVersionName); local builds default to 1 / 1.0.0.
 def goppoVersionCode = Integer.valueOf((project.findProperty('goppoVersionCode') ?: '1').toString())
 def goppoVersionName = (project.findProperty('goppoVersionName') ?: '1.0.0').toString()
@@ -77,6 +84,8 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    implementation platform("com.google.firebase:firebase-bom:$firebaseBomVersion")
+    implementation "com.google.firebase:firebase-messaging"
     implementation project(':capacitor-android')
     implementation project(':capacitor-cordova-android-plugins')
     testImplementation "junit:junit:$junitVersion"

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import com.getcapacitor.Logger
+import org.json.JSONObject
 import java.util.UUID
 
 /** Process-wide Phase 2 state shared by the activity, the WebView clients and the GoppoNative plugin. */
@@ -15,6 +16,30 @@ object GoppoRuntime {
     @Volatile
     var policy: UrlPolicy? = null
         private set
+
+    /** Activities currently on screen (started, not stopped). Used to decide whether a message needs a notification. */
+    @Volatile var startedActivities: Int = 0
+    val appVisible: Boolean get() = startedActivities > 0
+
+    /** Path of the page the WebView is showing ("/chat/12"), or null. */
+    @Volatile var currentPath: String? = null
+
+    /** Like [configure] but reads `server.url` from Capacitor's bundled config, so it works with no activity (FCM, receivers). */
+    fun ensureConfigured(context: Context): UrlPolicy? {
+        policy?.let { return it }
+        return try {
+            val text = context.applicationContext.assets.open("capacitor.config.json").bufferedReader().use { it.readText() }
+            configure(JSONObject(text).getJSONObject("server").getString("url"))
+        } catch (e: Exception) {
+            Logger.error("Goppo: cannot read server.url from capacitor.config.json", e)
+            null
+        }
+    }
+
+    /** Native -> website event on the plugin's "command" channel. Dropped if the page is not there (events are informational). */
+    fun emitToWeb(command: String, detail: JSONObject = JSONObject()) {
+        MainActivity.current?.get()?.sendCommand(command, com.getcapacitor.JSObject(detail.toString()))
+    }
 
     /** Builds the URL policy from Capacitor's `server.url`. A missing or non-https URL leaves the policy null: nothing loads or opens. */
     @Synchronized
