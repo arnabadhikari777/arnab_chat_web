@@ -38,15 +38,18 @@ object SiteClient {
         if (!path.startsWith("/") || path.startsWith("//")) return Result(0, "")
         return try {
             val token = if (csrf) fetchCsrf(origin) else null
-            if (csrf && token == null) return Result(401, "")
+            if (csrf && token == null) return Result(if (csrfFailure in 500..599 || csrfFailure == 0) 0 else 401, "")
             call(origin, method, path, body, withCookies, token)
         } catch (e: Exception) {
             Result(0, "")          // offline, DNS, TLS failure ...: callers treat 0 as "unknown", never as "ringing"
         }
     }
 
+    @Volatile private var csrfFailure = -1          // HTTP code of the last failed CSRF page fetch (server error != signed out)
+
     private fun fetchCsrf(origin: String): String? {
         val page = call(origin, "GET", CSRF_PAGE, null, withCookies = true, csrf = null)
+        csrfFailure = if (page.ok) -1 else page.code
         if (!page.ok) return null
         return CSRF_META.find(page.body)?.groupValues?.get(1)
     }

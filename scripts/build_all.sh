@@ -2,7 +2,7 @@
 # Builds the native libraries, then the Go calling server linked with CGO. Output: calling-server/bin/goppo-calling
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-"$ROOT/scripts/build_native.sh"
+bash "$ROOT/scripts/build_native.sh"
 cd "$ROOT/calling-server"
 export CGO_ENABLED=1
 mkdir -p bin

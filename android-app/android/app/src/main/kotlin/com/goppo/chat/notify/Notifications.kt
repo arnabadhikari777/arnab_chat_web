@@ -114,6 +114,14 @@ object CallNotifications {
             .build()
     }
 
+    /** Minimal notification used only to satisfy startForeground() when the call ended before the service could start (removed at once). */
+    fun buildEnding(context: Context): Notification {
+        NotificationChannels.ensure(context)
+        return NotificationCompat.Builder(context, NotificationChannels.ACTIVE_CALL)
+            .setSmallIcon(R.drawable.ic_stat_goppo).setColor(BRAND).setContentTitle(context.getString(R.string.app_name))
+            .setPriority(NotificationCompat.PRIORITY_LOW).setOnlyAlertOnce(true).setSilent(true).build()
+    }
+
     fun updateOngoing(context: Context, notification: Notification) = post(context, null, ID_ACTIVE, notification)
 
     fun cancelOngoing(context: Context) = NotificationManagerCompat.from(context).cancel(ID_ACTIVE)

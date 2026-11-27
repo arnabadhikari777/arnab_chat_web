@@ -50,6 +50,9 @@ class CallSessions(private val clock: () -> Long = System::currentTimeMillis) {
 
     fun isFinished(callId: String): Boolean = finished.containsKey(callId)
 
+    /** This exact call is the one the phone is handling right now (not ended). */
+    fun isLive(callId: String): Boolean = session?.info?.callId == callId
+
     fun onIncoming(info: CallInfo, expiresAtMs: Long): IncomingDecision {
         if (isFinished(info.callId)) return IncomingDecision.STALE
         val cur = session
@@ -75,6 +78,8 @@ class CallSessions(private val clock: () -> Long = System::currentTimeMillis) {
         if (isFinished(info.callId)) return false
         val cur = session
         if (cur != null && cur.info.callId != info.callId) return false
+        // A repeated "connected" (ICE restart after a network change) must not restart the call clock or the audio session.
+        if (cur != null && cur.phase == CallPhase.ACTIVE) return false
         val base = cur?.info ?: info
         current = CallSession(base, CallPhase.ACTIVE, 0L, clock(), cur?.muted ?: false)
         return true

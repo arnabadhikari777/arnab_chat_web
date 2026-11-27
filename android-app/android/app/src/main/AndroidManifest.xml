@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Phase 2 permissions only. Nothing for SMS, contacts, phone calls, storage, location or notifications. -->
+    <!-- Core permissions. Nothing for SMS, contacts, phone numbers, storage or location. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -18,6 +18,8 @@
                                        Not the dialer role, not CALL_PHONE, not READ_PHONE_STATE.
          FOREGROUND_SERVICE (+_PHONE_CALL, _MICROPHONE, _CAMERA)
                                        keep a connected call alive in the background (Android 14 needs the typed permissions).
+         BLUETOOTH_CONNECT             Android 12+ runtime permission: route call audio to a Bluetooth headset. Asked once, when a call
+                                       connects (never at start-up); a refusal only means earpiece / speaker / wired are used.
          VIBRATE is a normal permission added automatically for notification vibration; nothing else is requested. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -26,6 +28,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!-- Devices without a camera or microphone can still install the app (chat works without them). -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />

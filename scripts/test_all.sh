@@ -7,7 +7,7 @@ FAILFILE="$(mktemp)"; trap 'rm -f "$FAILFILE"' EXIT      # subshell-safe failure
 step() { echo; echo "================ $* ================"; }
 run()  { "$@" || { echo "FAILED: $*"; echo "$*" >> "$FAILFILE"; }; }
 
-step "native libraries (C, C++, Rust unit tests + build)"; run ./scripts/build_native.sh
+step "native libraries (C, C++, Rust unit tests + build)"; run bash ./scripts/build_native.sh
 
 step "C + C++ under AddressSanitizer / UndefinedBehaviorSanitizer"
 mkdir -p native/obj
@@ -30,7 +30,7 @@ step "Python: Flask unit/API/migration tests"; (cd chat-web && python3 -m pytest
 
 step "JavaScript: calling client (jsdom)"; (cd chat-web/tests/js && { [ -d node_modules ] || npm install --silent --no-audit --no-fund; } && run npm test 2>&1 | grep -E "^# (tests|pass|fail)")
 
-step "End-to-end: real Go binary + Flask + WebSockets"; run ./scripts/build_all.sh >/dev/null; (cd integration-tests && run python3 -m pytest -q -p no:cacheprovider 2>&1 | tail -3)
+step "End-to-end: real Go binary + Flask + WebSockets"; run bash ./scripts/build_all.sh >/dev/null; (cd integration-tests && run python3 -m pytest -q -p no:cacheprovider 2>&1 | tail -3)
 
 echo; [ ! -s "$FAILFILE" ] && echo "ALL MANDATORY SUITES PASSED" || echo "SOME SUITES FAILED (the known pre-existing Flask failures are listed in docs/TESTING_REPORT.md)"
 [ ! -s "$FAILFILE" ]

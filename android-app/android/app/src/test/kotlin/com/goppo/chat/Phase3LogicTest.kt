@@ -205,3 +205,50 @@ class AudioModelTest {
         assertNotNull(AudioModel.reconcile("x", all, true))
     }
 }
+
+/** Regression tests for the Phase 3 bug-fix pass (PHASE3_BUGFIX_REPORT.md). */
+class CallSessionsBugfixTest {
+    private var now = NOW
+    private val s = CallSessions { now }
+    private fun info(id: String = CALL, dir: CallDirection = CallDirection.INCOMING) = CallInfo(id, false, "Alice", "7", null, "12", "/chat/12", dir)
+    private val other = "11111111-2222-4333-8444-555555555555"
+
+    @Test fun aRepeatedConnectedEventDoesNotRestartTheCall() {            // ICE restart after a network change re-reports "connected"
+        s.onIncoming(info(), NOW + 60_000); s.onAccept(CALL)
+        assertTrue(s.onConnected(info()))
+        val first = s.session!!.connectedAtMs
+        now += 30_000
+        assertFalse(s.onConnected(info()))                               // false = the native layer must not restart audio / service
+        assertEquals(first, s.session!!.connectedAtMs)
+        assertEquals(CallPhase.ACTIVE, s.session!!.phase)
+    }
+
+    @Test fun onlyTheCurrentCallIsLive() {
+        assertFalse(s.isLive(CALL))
+        s.onIncoming(info(), NOW + 60_000)
+        assertTrue(s.isLive(CALL)); assertFalse(s.isLive(other))
+        s.onEnded(CALL)
+        assertFalse(s.isLive(CALL))                                      // a Telecom connection created after this must be refused
+    }
+
+    @Test fun anUnrelatedCallEndingNeverEndsTheRingingCall() {
+        s.onIncoming(info(), NOW + 60_000)
+        assertFalse(s.onEnded(other))                                    // NativeCallManager then leaves timers / notification alone
+        assertEquals(CallPhase.RINGING, s.session!!.phase)
+        assertEquals(CALL, s.session!!.info.callId)
+    }
+
+    @Test fun rejectingAfterAcceptanceIsRefusedAndKeepsOneSession() {
+        s.onIncoming(info(), NOW + 60_000)
+        assertTrue(s.onAccept(CALL)); assertFalse(s.onAccept(CALL))      // second tap: no second session
+        assertEquals(CallPhase.ACCEPTING, s.session!!.phase)
+        assertEquals(IncomingDecision.BUSY, s.onIncoming(info(other), NOW + 60_000))
+    }
+
+    @Test fun aCancelledCallCannotBeAcceptedAndANewOneCanRing() {
+        s.onIncoming(info(), NOW + 60_000)
+        s.onCancelled(CALL, "cancelled")
+        assertFalse(s.onAccept(CALL))
+        assertEquals(IncomingDecision.NEW, s.onIncoming(info(other), NOW + 60_000))
+    }
+}

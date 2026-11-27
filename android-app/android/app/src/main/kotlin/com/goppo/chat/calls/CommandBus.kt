@@ -23,7 +23,10 @@ object CommandBus {
 
     fun enqueue(command: String, detail: JSONObject, ttlMs: Long = 30_000L, onResult: ((Boolean) -> Unit)? = null) {
         main.post {
-            queue.addLast(Pending(nextId++, command, detail, SystemClock.elapsedRealtime() + ttlMs, onResult))
+            val p = Pending(nextId++, command, detail, SystemClock.elapsedRealtime() + ttlMs, onResult)
+            queue.addLast(p)
+            // The page may never become ready (killed WebView, no network): the command must still end, or the caller waits forever.
+            main.postDelayed({ if (queue.remove(p)) p.onResult?.invoke(false) }, ttlMs)
             drain()
         }
     }
@@ -50,7 +53,10 @@ object CommandBus {
     }
 
     fun clear() {
-        main.post { queue.clear() }
+        main.post {
+            val dropped = queue.toList(); queue.clear()
+            dropped.forEach { it.onResult?.invoke(false) }          // a dropped accept must not leave the call stuck in "accepting"
+        }
     }
 
     private const val RESULT_TIMEOUT_MS = 12_000L

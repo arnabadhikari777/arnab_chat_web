@@ -38,6 +38,7 @@ object NativeCallManager {
     private val avatars = HashMap<String, Bitmap>()
     private var timeout: Runnable? = null
     private var poll: Runnable? = null
+    private var mutedBeforeHold = false
 
     fun init(context: Context) {
         if (appContext == null) appContext = context.applicationContext
@@ -92,7 +93,7 @@ object NativeCallManager {
             } catch (_: Exception) {
             }
         }
-        AvatarLoader.load(info.avatarUrl, 384) { bmp -> if (bmp != null) avatars[info.callId] = bmp }
+        AvatarLoader.load(info.avatarUrl, 384) { bmp -> if (bmp != null && sessions.isLive(info.callId)) avatars[info.callId] = bmp }   // never cache for an ended call
         scheduleTimeout(info.callId, expiresAtMs)
         startPolling(info.callId)
         GoppoRuntime.emitToWeb("call:incoming", JSONObject().put("call_id", info.callId).put("call_type", if (info.video) "video" else "voice"))
@@ -133,7 +134,7 @@ object NativeCallManager {
             }
         }
         poll = r
-        main.postDelayed(r, POLL_MS)
+        main.postDelayed(r, FIRST_POLL_MS)              // check almost at once: a late push for a call that already ended dies in ~1 s
     }
 
     private fun onServerSaysOver(callId: String, status: String) {
@@ -224,7 +225,7 @@ object NativeCallManager {
             stopRinging(id, DisconnectCause.REJECTED)
             GoppoRuntime.emitToWeb("call:rejected", JSONObject().put("call_id", id))
             // The server is the authority: decline there even when no page is open. The page (if open) is told too; its own POST is idempotent.
-            io.execute { SiteClient.postJson(c, "/api/calling/status", JSONObject().put("call_id", id).put("status", "rejected").toString()) }
+            io.execute { postWithRetry(c, JSONObject().put("call_id", id).put("status", "rejected").toString()) }
             CommandBus.enqueue("call:reject", JSONObject().put("call_id", id), 5_000L)
         }
     }
@@ -267,6 +268,7 @@ object NativeCallManager {
             if (bmp != null && sessions.session?.info?.callId == info.callId) { avatars[info.callId] = bmp; ActiveCallService.start(c) }
         }
         AudioRouter.start(c, info.video, telecom)
+        com.goppo.chat.MainActivity.current?.get()?.requestBluetoothForCall()     // Android 12+: needed to route audio to a headset
         ActiveCallService.start(c)
         GoppoRuntime.emitToWeb("call:connected", JSONObject().put("call_id", info.callId).put("telecom", telecom))
     }
@@ -281,8 +283,13 @@ object NativeCallManager {
     private fun onEnded(callId: String, status: String) {
         if (callId.isEmpty()) return
         val wasCurrent = sessions.onEnded(callId)
-        stopRinging(callId, DisconnectCause.LOCAL)
-        if (wasCurrent) cleanupCall(callId, emit = true, status = status)
+        if (wasCurrent) {
+            stopRinging(callId, DisconnectCause.LOCAL)
+            cleanupCall(callId, emit = true, status = status)
+        } else {
+            // An old / unrelated call ended: it must not touch the timers, notification or screen of the call that is ringing now.
+            TelecomBridge.finish(callId, DisconnectCause.LOCAL)
+        }
     }
 
     private fun cleanupCall(callId: String, emit: Boolean, status: String = "ended") {
@@ -305,10 +312,21 @@ object NativeCallManager {
             CommandBus.enqueue("call:hangup", JSONObject().put("call_id", id), 6_000L) { handled ->
                 if (!handled && sessions.session?.info?.callId == id) {
                     // The page is gone (process restarted, navigated away): end it on the server ourselves and clean up.
-                    io.execute { SiteClient.postJson(c, "/api/calling/status", JSONObject().put("call_id", id).put("status", "completed").toString()) }
+                    io.execute { postWithRetry(c, JSONObject().put("call_id", id).put("status", "completed").toString()) }
                     run { onEnded(id, "completed") }
                 }
             }
+        }
+    }
+
+    /** Status POST that survives a short network drop (offline = code 0, server error = 5xx); other answers are final. Background thread only. */
+    private fun postWithRetry(c: Context, json: String) {
+        var wait = 1_000L
+        repeat(3) {
+            val r = try { SiteClient.postJson(c, "/api/calling/status", json) } catch (_: Exception) { null }
+            if (r != null && r.code != 0 && r.code !in 500..599) return
+            try { Thread.sleep(wait) } catch (_: InterruptedException) { return }
+            wait *= 2
         }
     }
 
@@ -328,7 +346,13 @@ object NativeCallManager {
     fun onTelecomReject(callId: String) { run { val c = ctx() ?: return@run; if (sessions.session?.info?.callId == callId) reject(c) } }
     fun onTelecomDisconnect(callId: String) { run { val c = ctx() ?: return@run; if (sessions.session?.info?.callId == callId) endCall(c) } }
     fun onTelecomHold(callId: String, held: Boolean) {
-        run { if (sessions.session?.info?.callId == callId) { Logger.info("Goppo: call on hold=$held"); setMuted(held) } }
+        run {
+            val s = sessions.session ?: return@run
+            if (s.info.callId != callId) return@run
+            Logger.info("Goppo: call on hold=$held")
+            if (held) { mutedBeforeHold = s.muted; setMuted(true) }
+            else setMuted(mutedBeforeHold)                       // resume with the mute the person had chosen, not "unmuted"
+        }
     }
 
     // ------------------------------------------------------------------ state for the plugin
@@ -343,4 +367,5 @@ object NativeCallManager {
     }
 
     private const val POLL_MS = 4_000L
+    private const val FIRST_POLL_MS = 1_000L
 }

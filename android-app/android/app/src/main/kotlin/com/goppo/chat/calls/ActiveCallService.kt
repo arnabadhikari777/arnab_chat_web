@@ -29,7 +29,18 @@ class ActiveCallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val session = NativeCallManager.session()
         if (intent?.action == ACTION_STOP || session == null || session.phase != CallPhase.ACTIVE) {
+            // Started with startForegroundService() but the call is already gone (ended in the meantime): Android 8+ still REQUIRES
+            // startForeground() within 5 s or it kills the app (ForegroundServiceDidNotStartInTimeException). Enter the foreground
+            // briefly, then leave and remove the notification at once.
+            if (intent?.action != ACTION_STOP) {
+                try {
+                    startInForeground(CallNotifications.buildEnding(this), false)
+                } catch (e: Exception) {
+                    Logger.warn("Goppo: could not enter the foreground before stopping (${e.javaClass.simpleName})")
+                }
+            }
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            CallNotifications.cancelOngoing(this)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -75,11 +86,9 @@ class ActiveCallService : Service() {
         }
 
         fun stop(context: Context) {
-            try {
-                context.startService(Intent(context, ActiveCallService::class.java).setAction(ACTION_STOP))
-            } catch (_: Exception) {
-                context.stopService(Intent(context, ActiveCallService::class.java))
-            }
+            // stopService() is allowed from the background and never needs a foreground transition. A start that is still pending
+            // (startForegroundService just called) is handled by onStartCommand above, which sees the call is over.
+            try { context.stopService(Intent(context, ActiveCallService::class.java)) } catch (_: Exception) { }
             CallNotifications.cancelOngoing(context)
         }
     }

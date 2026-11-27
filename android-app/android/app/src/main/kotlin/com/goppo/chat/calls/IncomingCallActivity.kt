@@ -60,14 +60,19 @@ class IncomingCallActivity : Activity() {
         setContentView(buildUi(session))
         ui.post(tick)
         val cached = NativeCallManager.avatar(callId)
-        if (cached != null) setAvatar(cached) else AvatarLoader.load(session.info.avatarUrl, 384) { bmp -> if (bmp != null) setAvatar(bmp) }
+        if (cached != null) setAvatar(cached) else AvatarLoader.load(session.info.avatarUrl, 384) { bmp -> if (bmp != null && !isDestroyed && !isFinishing) setAvatar(bmp) }
         if (intent.getBooleanExtra(EXTRA_AUTO_ACCEPT, false)) accept()               // the "Answer" button of the notification
     }
 
-    override fun onNewIntent(intent: Intent) {
+    override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_AUTO_ACCEPT, false)) accept()
+        // A late or stale intent (an old notification button) may only act on the call this screen is showing.
+        val live = NativeCallManager.session()
+        if (live == null || live.phase != CallPhase.RINGING) { finish(); return }
+        val target = intent?.getStringExtra(EXTRA_CALL_ID)
+        if (live.info.callId != callId || (target != null && target != callId)) return
+        if (intent?.getBooleanExtra(EXTRA_AUTO_ACCEPT, false) == true) accept()      // the "Answer" button of the notification
     }
 
     override fun onDestroy() {

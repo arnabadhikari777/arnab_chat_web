@@ -205,9 +205,8 @@ class MainActivity : BridgeActivity() {
         super.onStop()
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onNewIntent(intent: android.content.Intent?) {
         super.onNewIntent(intent)
-        setIntent(intent)
         // A notification was tapped / a call was accepted while the app is already running.
         openUrlFrom(intent)?.let { url -> bridge?.webView?.takeIf { it.url != url }?.loadUrl(url) }
         CommandBus.drain()
@@ -249,6 +248,20 @@ class MainActivity : BridgeActivity() {
      * GoppoPlatform.receive() answers {handled:false} until calling.js has registered its handlers, so the script retries
      * for ~9 s (page still loading right after a cold start from a notification).
      */
+    /**
+     * Android 12+ lets an app route call audio to a Bluetooth headset only with BLUETOOTH_CONNECT. It is asked once, when a call is
+     * really connected (that is the functional reason); a refusal is remembered and never nagged again, and calls keep working
+     * on earpiece / speaker / wired headset.
+     */
+    fun requestBluetoothForCall() {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        val perm = android.Manifest.permission.BLUETOOTH_CONNECT
+        val prefs = getSharedPreferences("goppo_native", MODE_PRIVATE)
+        if (prefs.getBoolean("bt_asked", false) || mediaPermissions.grantedAmong(listOf(perm)).isNotEmpty()) return
+        prefs.edit().putBoolean("bt_asked", true).apply()
+        mediaPermissions.request(listOf(perm)) { }
+    }
+
     fun runCommand(id: Long, command: String, detail: JSONObject) {
         val webView = bridge?.webView ?: return
         val script = COMMAND_SCRIPT.replace("__ID__", id.toString()).replace("__CMD__", JSONObject.quote(command))

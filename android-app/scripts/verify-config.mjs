@@ -39,12 +39,12 @@ check("Kotlin/AGP/Gradle versions pinned", () => {
   assert.match(read("android/gradle/wrapper/gradle-wrapper.properties"), /gradle-8\.11\.1-all\.zip/);
 });
 const perms = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map((m) => m[1].replace("android.permission.", "")).sort();
-check("only the documented Phase 2 + Phase 3 permissions are declared", () => assert.deepEqual(perms, [
-  "CAMERA", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_CAMERA", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_PHONE_CALL", "INTERNET",
+check("only the documented Phase 2 + Phase 3 permissions are declared (BLUETOOTH_CONNECT: Android 12+ headset routing, asked once at call connect)", () => assert.deepEqual(perms, [
+  "BLUETOOTH_CONNECT", "CAMERA", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_CAMERA", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_PHONE_CALL", "INTERNET",
   "MANAGE_OWN_CALLS", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "RECORD_AUDIO", "USE_FULL_SCREEN_INTENT"]));
 check("no SMS / contacts / call-log / phone-state / location / storage / dialer permissions", () => {
   for (const bad of ["READ_SMS", "READ_CONTACTS", "CALL_PHONE", "READ_CALL_LOG", "READ_PHONE_STATE", "ANSWER_PHONE_CALLS", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION",
-    "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "SYSTEM_ALERT_WINDOW", "BLUETOOTH_CONNECT", "RECEIVE_BOOT_COMPLETED"]) assert.ok(!perms.includes(bad), bad);
+    "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "SYSTEM_ALERT_WINDOW", "RECEIVE_BOOT_COMPLETED"]) assert.ok(!perms.includes(bad), bad);
   assert.ok(!/default.?dialer|ROLE_DIALER|InCallService/i.test(manifest));
 });
 check("Phase 3 components: services/receivers not exported; only Telecom (system-bound) and the launcher activity are", () => {
@@ -102,6 +102,17 @@ check("the bridge asset exists and is current (npm run prepare:bridge)", () => {
 check("synced Android config matches (run `npx cap sync android` if this fails)", () => {
   if (!synced) return console.log("       (not synced yet: skipped)");
   assert.equal(synced.server.url, PROD); assert.equal(synced.server.cleartext, false);
+});
+check("Phase 3 bug-fix guards: shell scripts executable, audio focus listener retained, no foreground-service start without startForeground", () => {
+  for (const f of ["test_all.sh", "build_native.sh", "build_all.sh"]) assert.ok((statSync(resolve(root, "../scripts", f)).mode & 0o111) !== 0, f + " must be executable");
+  const router = read("android/app/src/main/kotlin/com/goppo/chat/audio/AudioRouter.kt");
+  assert.ok(!/abandonAudioFocus\(null\)/.test(router), "abandonAudioFocus must receive the original listener");
+  assert.match(router, /private val focusChangeListener/);
+  assert.match(router, /abandonAudioFocus\(focusChangeListener\)/);
+  assert.match(router, /AudioManager\.MODE_IN_COMMUNICATION/);
+  const svc = read("android/app/src/main/kotlin/com/goppo/chat/calls/ActiveCallService.kt");
+  assert.match(svc, /buildEnding/);                       // startForeground before stopSelf when the call already ended
+  assert.ok(!/context\.startService\(/.test(svc));
 });
 check("workflow exists and never prints secrets", () => {
   const wf = readFileSync(resolve(repo, ".github/workflows/android-build.yml"), "utf8");

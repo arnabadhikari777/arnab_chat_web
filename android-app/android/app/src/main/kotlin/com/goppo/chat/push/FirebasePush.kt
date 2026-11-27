@@ -60,8 +60,14 @@ class GoppoFirebaseService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val ctx = applicationContext
-        NativeCallManager.init(ctx)
-        val parsed = PushParser.parse(message.data, System.currentTimeMillis())
+        // Nothing in a push payload may ever crash the app: init + parsing are guarded like the handling below.
+        val parsed = try {
+            NativeCallManager.init(ctx)
+            PushParser.parse(message.data, System.currentTimeMillis())
+        } catch (e: Exception) {
+            Logger.warn("Goppo: push could not be parsed (${e.javaClass.simpleName})")
+            return
+        }
         // Run on the main thread (notifications, Telecom, windows) but do not return before it is done: the process may be frozen after return.
         val done = CountDownLatch(1)
         android.os.Handler(android.os.Looper.getMainLooper()).post {

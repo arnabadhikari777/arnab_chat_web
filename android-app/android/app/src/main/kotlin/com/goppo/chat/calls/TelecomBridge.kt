@@ -133,12 +133,16 @@ class GoppoConnectionService : ConnectionService() {
 
     override fun onCreateIncomingConnection(account: PhoneAccountHandle?, request: ConnectionRequest?): Connection {
         val id = callId(request, TelecomManager.EXTRA_INCOMING_CALL_EXTRAS) ?: return Connection.createFailedConnection(DisconnectCause(DisconnectCause.ERROR))
+        // addNewIncomingCall() is asynchronous: if the call was cancelled / rejected / answered elsewhere before Telecom got here,
+        // creating the connection now would leave a ringing ghost that nothing ever finishes.
+        if (NativeCallManager.session()?.info?.callId != id) return Connection.createFailedConnection(DisconnectCause(DisconnectCause.REMOTE))
         val peer = (request?.extras?.getBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS))?.getString(TelecomBridge.EXTRA_PEER) ?: ""
         return GoppoConnection(id, peer).also { it.setRinging(); TelecomBridge.add(id, it) }
     }
 
     override fun onCreateOutgoingConnection(account: PhoneAccountHandle?, request: ConnectionRequest?): Connection {
         val id = callId(request, TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS) ?: return Connection.createFailedConnection(DisconnectCause(DisconnectCause.ERROR))
+        if (NativeCallManager.session()?.info?.callId != id) return Connection.createFailedConnection(DisconnectCause(DisconnectCause.REMOTE))
         val peer = (request?.extras?.getBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS))?.getString(TelecomBridge.EXTRA_PEER) ?: ""
         // The website already reports the call as connected when this is created.
         return GoppoConnection(id, peer).also { it.setActive(); TelecomBridge.add(id, it) }
