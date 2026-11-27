@@ -1,3 +1,6 @@
 .env
 .venv
 /venv
+native/lib/*.a
+/.a
+libgoppo_secure_media.a
