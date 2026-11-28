@@ -45,6 +45,11 @@
       init.body = JSON.stringify(opts.body);
     }
     try {
+      if (window.GOPPO_BUNDLE && window.app && window.app.api) {          // Android app (bundled UI): through the native HTTPS bridge, same session + CSRF
+        const r = await window.app.api("/api/calling" + path, { method: init.method, json: opts.body });
+        const d = r.ok ? r.data : { error: r.error };
+        return { ok: r.ok && d.ok !== false, status: r.status, data: d };
+      }
       const res = await fetch("/api/calling" + path, init);
       const data = await res.json().catch(() => ({}));
       return { ok: res.ok && data.ok !== false, status: res.status, data };
@@ -130,6 +135,10 @@
     o.classList.remove("hidden");
     o.querySelector(".goppo-call-panel").dataset.screen = name;
     const c = S.call;
+    // A stale duration must never show on a new call: only an ACTIVE call with a running timer, or the ENDED summary,
+    // may show the timer; every other screen (wake / calling / incoming / connecting) starts clean.
+    const timerEl = $("goppo-call-timer");
+    if (timerEl && !(name === "ended" || (name === "active" && c && c.timer))) { timerEl.hidden = true; timerEl.textContent = "00:00"; }
     if (c && c.peer) {
       $("goppo-call-name").textContent = c.peer.full_name || c.peer.username || "";
       const av = $("goppo-call-avatar");
@@ -177,6 +186,7 @@
   function closeOverlay() {
     const o = $("goppo-call-overlay");
     if (o) o.classList.add("hidden");
+    const tEl = $("goppo-call-timer"); if (tEl) { tEl.hidden = true; tEl.textContent = "00:00"; }
     stopRing();
     if (S.call && S.call.ended) S.call = null;
   }
@@ -577,7 +587,8 @@
   // ------------------------------------------------------------------ in-call controls
   function startTimer(call) {
     const el = $("goppo-call-timer"); if (!el) return;
-    el.hidden = false; clearInterval(call.timer);
+    if (call.timer) return;                       // already running: a repeated "connected" must not restart it
+    el.hidden = false;
     call.timer = setInterval(() => { el.textContent = fmt(Math.floor((Date.now() - call.connectedAt) / 1000)); }, 1000);
     el.textContent = "00:00";
   }
@@ -691,7 +702,7 @@
 
   function teardown(call) {
     call.ended = true; call.closing = true;
-    clearInterval(call.timer); clearInterval(call.statsTimer); clearTimeout(call.iceTimer);
+    clearInterval(call.timer); call.timer = null; clearInterval(call.statsTimer); clearTimeout(call.iceTimer);
     try { call.ws && call.ws.close(1000, "bye"); } catch (e) {}
     try { call.pc && call.pc.close(); } catch (e) {}
     try { call.stream && call.stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
@@ -843,7 +854,7 @@
   }
 
   async function init() {
-    if (!document.querySelector('meta[name="csrf-token"]')) return;     // not a logged-in page
+    if (!window.GOPPO_BUNDLE && !document.querySelector('meta[name="csrf-token"]')) return;     // not a logged-in page (the bundled pages are always logged-in pages)
     const cfg = await loadConfig();
     if (!cfg.enabled) return;
     injectCallButtons();

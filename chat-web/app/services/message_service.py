@@ -2,13 +2,13 @@
 import re
 from datetime import datetime
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from flask import current_app
 
 from ..extensions import db
-from ..models import Conversation, Message, MessageAttachment, MessageDeletion, User
+from ..models import Conversation, Message, MessageAttachment, MessageDeletion, SyncCounter, User
 from ..realtime import get_backend
 from ..utils.time import utcnow
 from . import cloudinary_service, notification_service
@@ -45,17 +45,57 @@ def _unread_filter(user_id: int):
     )
 
 
+def next_rev() -> int:
+    """The next sync revision (see models.SyncCounter). Call it inside the transaction of the change it numbers: the
+    UPDATE takes the row lock, which is held until that transaction commits, so revisions commit in order."""
+    if db.session.get(SyncCounter, 1) is None:
+        top = db.session.query(func.coalesce(func.max(Message.sync_rev), 0)).scalar() or 0
+        db.session.add(SyncCounter(id=1, value=int(top)))
+        try:
+            db.session.flush()
+        except IntegrityError:               # another request created it first
+            db.session.rollback()
+    db.session.execute(update(SyncCounter).where(SyncCounter.id == 1).values(value=SyncCounter.value + 1))
+    return int(db.session.execute(select(SyncCounter.value).where(SyncCounter.id == 1)).scalar_one())
+
+
+def sync_head() -> int:
+    """The newest revision handed out so far (0 on a database that has no messages yet)."""
+    row = db.session.execute(select(SyncCounter.value).where(SyncCounter.id == 1)).scalar()
+    if row is not None:
+        return int(row)
+    return int(db.session.query(func.coalesce(func.max(Message.sync_rev), 0)).scalar() or 0)
+
+
+def thumbnail_url(url: str | None, resource_type: str | None) -> str | None:
+    """A small preview for a Cloudinary image / video (no extra storage: Cloudinary makes it on request).
+    Anything that is not a Cloudinary delivery URL gets no thumbnail (the app then shows a placeholder)."""
+    if not url or "/upload/" not in url or resource_type not in ("image", "video"):
+        return None
+    head, _, tail = url.partition("/upload/")
+    if resource_type == "image":
+        return f"{head}/upload/c_limit,w_480,q_auto,f_auto/{tail}"
+    stem = tail.rsplit(".", 1)[0] if "." in tail.rsplit("/", 1)[-1] else tail
+    return f"{head}/upload/so_0,c_limit,w_480,q_auto/{stem}.jpg"
+
+
 def serialize(msg: Message, viewer_id: int) -> dict:
     att = None
     if msg.attachments and not msg.deleted_for_all:
         a = msg.attachments[0]
-        att = {"url": a.url, "name": a.original_name, "size": a.size_bytes,
-               "mime": a.mime_type, "dur": a.duration_seconds}
+        att = {"id": a.id, "url": a.url, "name": a.original_name, "size": a.size_bytes,
+               "mime": a.mime_type, "dur": a.duration_seconds, "w": a.width, "h": a.height,
+               "thumb": thumbnail_url(a.url, a.resource_type)}
     return {
         "id": msg.id, "uuid": msg.client_uuid, "type": msg.type,
         "body": "" if msg.deleted_for_all else msg.body,
         "mine": msg.sender_id == viewer_id, "status": msg.status,
         "at": iso(msg.created_at), "deleted": msg.deleted_for_all, "att": att,
+        # added for the Android local database (the website ignores them)
+        "conv": msg.conversation_id, "sender": msg.sender_id, "rev": msg.sync_rev or 0,
+        "delivered_at": iso(msg.delivered_at) if msg.delivered_at else None,
+        "seen_at": iso(msg.seen_at) if msg.seen_at else None,
+        "deleted_at": iso(msg.deleted_at) if msg.deleted_at else None,
     }
 
 
@@ -154,7 +194,7 @@ def send_text(user: User, conv: Conversation, client_uuid: str, body: str):
     if (old := _existing(user.id, client_uuid)):
         return old, False
     msg = Message(conversation_id=conv.id, sender_id=user.id, type="text", body=body,
-                  client_uuid=client_uuid)
+                  client_uuid=client_uuid, sync_rev=next_rev())
     db.session.add(msg)
     try:
         db.session.flush()
@@ -188,7 +228,7 @@ def send_media(user: User, conv: Conversation, client_uuid: str, file, voice: bo
 
     asset = cloudinary_service.upload_media(upload)
     msg = Message(conversation_id=conv.id, sender_id=user.id, type=kind, body=caption,
-                  client_uuid=client_uuid)
+                  client_uuid=client_uuid, sync_rev=next_rev())
     msg.attachments.append(MessageAttachment(
         public_id=asset["public_id"], url=asset["url"], resource_type=asset["resource_type"],
         mime_type=upload.mime, original_name=upload.filename,
@@ -250,10 +290,14 @@ def mark_delivered_upto(user: User, conv: Conversation, upto_id: int) -> int:
     Only 'sent' messages from the OTHER person move forward; seen is never moved back."""
     if not upto_id:
         return 0
-    return Message.query.filter(
+    q = Message.query.filter(
         Message.conversation_id == conv.id, Message.sender_id != user.id,
         Message.status == "sent", Message.id <= upto_id,
-    ).update({"status": "delivered", "delivered_at": utcnow()}, synchronize_session=False)
+    )
+    if q.with_entities(Message.id).first() is None:
+        return 0                                   # nothing to change = no new revision
+    return q.update({"status": "delivered", "delivered_at": utcnow(), "sync_rev": next_rev()},
+                    synchronize_session=False)
 
 
 def mark_seen(user: User, conv: Conversation, upto_id: int | None = None) -> int:
@@ -264,9 +308,10 @@ def mark_seen(user: User, conv: Conversation, upto_id: int | None = None) -> int
     )
     if upto_id:
         q = q.filter(Message.id <= upto_id)
-    n = q.update({"status": "seen", "seen_at": now,
-                  "delivered_at": func.coalesce(Message.delivered_at, now)},
-                 synchronize_session=False)
+    values = {"status": "seen", "seen_at": now, "delivered_at": func.coalesce(Message.delivered_at, now)}
+    if q.with_entities(Message.id).first() is not None:
+        values["sync_rev"] = next_rev()            # the sender's app learns about the blue ticks through the change feed
+    n = q.update(values, synchronize_session=False)
     cleared = notification_service.clear_message_notice(user.id, conv.id)
     if n or cleared:                        # nothing new to acknowledge = nothing to write
         db.session.commit()
@@ -285,6 +330,7 @@ def get_message_for_member(user: User, message_id: int):
 def delete_for_me(user: User, msg: Message) -> None:
     if not db.session.get(MessageDeletion, (msg.id, user.id)):
         db.session.add(MessageDeletion(message_id=msg.id, user_id=user.id))
+        msg.sync_rev = next_rev()                  # this person's other devices drop it on their next sync
         db.session.commit()
 
 
@@ -298,12 +344,51 @@ def delete_for_everyone(user: User, msg: Message) -> None:
     msg.deleted_for_all = True
     msg.deleted_at = utcnow()
     msg.body = ""
+    msg.sync_rev = next_rev()                      # the tombstone travels through the change feed, also to offline phones
     for a in list(msg.attachments):
         db.session.delete(a)
     db.session.commit()
     for public_id, resource_type in assets:
         cloudinary_service.delete_asset(public_id, resource_type)
     get_backend().publish("deleted", msg.conversation_id, {"id": msg.id})
+    _sync_hint_other_member(user, msg, "deleted")
+
+
+def _sync_hint_other_member(user: User, msg: Message, reason: str) -> None:
+    """Best effort: wake the other person's Android app so it fetches the change now. A phone that is off or has no
+    push simply picks the change up on its next sync - the change feed, not this hint, is what guarantees delivery."""
+    try:
+        conv = db.session.get(Conversation, msg.conversation_id)
+        if conv is None:
+            return
+        from . import fcm_service
+        fcm_service.deliver_sync_hint(conv.other_user_id(user.id), reason, conv.id)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        current_app.logger.exception("sync hint failed for message %s", msg.id)
+
+
+# ------------------------------------------------------------------ change feed (Android local database)
+def sync_changes(user: User, after_rev: int, after_id: int, limit: int = 200):
+    """Every message of this person's conversations that is newer than the cursor (rev, id), oldest change first.
+
+    The cursor is (sync_rev, id): one bulk change (e.g. "seen" for 50 messages) shares one revision, so the id
+    breaks the tie and a page boundary can never skip a message. Returns (rows, hidden_ids, has_more).
+    Messages this person deleted "for me" are returned flagged hidden so a second phone of theirs drops them too.
+    """
+    limit = max(1, min(int(limit or 200), 500))
+    q = Message.query.filter(
+        Message.conversation_id.in_(_my_conversation_ids(user.id)),
+        or_(Message.sync_rev > after_rev, and_(Message.sync_rev == after_rev, Message.id > after_id)),
+    ).order_by(Message.sync_rev.asc(), Message.id.asc()).limit(limit + 1)
+    rows = q.all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    hidden = set()
+    if rows:
+        hidden = {mid for (mid,) in db.session.query(MessageDeletion.message_id).filter(
+            MessageDeletion.user_id == user.id, MessageDeletion.message_id.in_([m.id for m in rows])).all()}
+    return rows, hidden, has_more
 
 
 # ------------------------------------------------------------------ chat list
@@ -341,7 +426,7 @@ def chat_list(user: User, limit: int = 100) -> list[dict]:
         if other is None or other.status != "active":
             continue
         items.append({
-            "id": conv.id, "unread": unread_by_conv.get(conv.id, 0),
+            "id": conv.id, "peer_id": other.id, "unread": unread_by_conv.get(conv.id, 0),
             "last": _preview(last_by_conv.get(conv.id), user.id),
             "user": {"name": other.full_name, "username": other.username,
                      "avatar": other.avatar_url, "online": is_online(other), "seed": other.id % 5},

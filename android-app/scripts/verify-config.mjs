@@ -21,7 +21,19 @@ const synced = existsSync(resolve(root, "android/app/src/main/assets/capacitor.c
   ? JSON.parse(read("android/app/src/main/assets/capacitor.config.json")) : null;
 
 console.log("verify-config");
-check("server.url is the production HTTPS site (no dev URL)", () => assert.equal(cfg.server.url, PROD));
+check("the UI is bundled: no remote server.url; the local origin is https://localhost (Task 2)", () => {
+  assert.equal(cfg.server.url, undefined); assert.equal(cfg.server.androidScheme, "https"); assert.equal(cfg.server.hostname, "localhost");
+});
+check("the backend URL lives in assets/goppo-backend.json (public URL, no secrets) and is the production HTTPS site", () => {
+  const b = JSON.parse(read("android/app/src/main/assets/goppo-backend.json")); assert.equal(b.backendUrl, PROD); assert.deepEqual(Object.keys(b), ["backendUrl"]);
+});
+check("the bundled frontend is complete (run `npm run build:web`): required pages, scripts, styles, fonts, i18n", () => {
+  const need = ["index.html", "login.html", "messages.html", "chat.html", "settings.html", "offline.html", "static/js/chat.js", "static/js/platform.js", "static/js/calling.js",
+    "static/js/local-first.js", "static/css/components.css", "i18n/bundle-en.json", "i18n/bundle-bn.json"];
+  for (const f of need) assert.ok(existsSync(resolve(root, "www", f)), "www/" + f + " missing");
+  const html = read("www/chat.html"); assert.ok(!/https?:\/\/(fonts\.googleapis|fonts\.gstatic|cdn\.)/.test(html), "no remote CDN in bundled pages");
+  assert.ok(!/csrf-token/.test(html), "no CSRF token baked into a bundled page");
+});
 check("cleartext is off, no mixed content, no WebView debugging", () => {
   assert.equal(cfg.server.cleartext, false); assert.equal(cfg.android.allowMixedContent, false); assert.equal(cfg.android.webContentsDebuggingEnabled, false);
 });
@@ -40,7 +52,7 @@ check("Kotlin/AGP/Gradle versions pinned", () => {
 });
 const perms = [...manifest.matchAll(/<uses-permission android:name="([^"]+)"/g)].map((m) => m[1].replace("android.permission.", "")).sort();
 check("only the documented Phase 2 + Phase 3 permissions are declared (BLUETOOTH_CONNECT: Android 12+ headset routing, asked once at call connect)", () => assert.deepEqual(perms, [
-  "BLUETOOTH_CONNECT", "CAMERA", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_CAMERA", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_PHONE_CALL", "INTERNET",
+  "ACCESS_NETWORK_STATE", "BLUETOOTH_CONNECT", "CAMERA", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_CAMERA", "FOREGROUND_SERVICE_MICROPHONE", "FOREGROUND_SERVICE_PHONE_CALL", "INTERNET",
   "MANAGE_OWN_CALLS", "MODIFY_AUDIO_SETTINGS", "POST_NOTIFICATIONS", "RECORD_AUDIO", "USE_FULL_SCREEN_INTENT"]));
 check("no SMS / contacts / call-log / phone-state / location / storage / dialer permissions", () => {
   for (const bad of ["READ_SMS", "READ_CONTACTS", "CALL_PHONE", "READ_CALL_LOG", "READ_PHONE_STATE", "ANSWER_PHONE_CALLS", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION",
@@ -97,11 +109,11 @@ check("release signing comes from environment variables only; no keystore or sec
 });
 check("the bridge asset exists and is current (npm run prepare:bridge)", () => {
   const js = read("android/app/src/main/assets/goppo-bridge.js");
-  assert.ok(js.includes('registerPlugin("GoppoNative")') && js.includes("@capacitor/core " + pkg.dependencies["@capacitor/core"]));
+  assert.ok(js.includes('"GoppoNative", "GoppoLocal"') && js.includes("@capacitor/core " + pkg.dependencies["@capacitor/core"]));
 });
 check("synced Android config matches (run `npx cap sync android` if this fails)", () => {
   if (!synced) return console.log("       (not synced yet: skipped)");
-  assert.equal(synced.server.url, PROD); assert.equal(synced.server.cleartext, false);
+  assert.equal(synced.server.url, undefined); assert.equal(synced.server.cleartext, false);
 });
 check("Phase 3 bug-fix guards: shell scripts executable, audio focus listener retained, no foreground-service start without startForeground", () => {
   for (const f of ["test_all.sh", "build_native.sh", "build_all.sh"]) assert.ok((statSync(resolve(root, "../scripts", f)).mode & 0o111) !== 0, f + " must be executable");

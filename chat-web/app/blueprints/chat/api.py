@@ -68,8 +68,42 @@ def summary():
 @bp.get("/api/chats")
 @auth_required
 def chats():
-    items = message_service.chat_list(current_user)
+    items = message_service.chat_list(current_user, limit=max(1, min(_int(request.args.get("limit"), 100) or 100, 500)))
     return jsonify({"chats": items, "total_unread": sum(c["unread"] for c in items)})
+
+
+# ------------------------------------------------------------------ change feed for the Android local database
+@bp.get("/api/sync/head")
+@auth_required
+@limiter.limit("120 per minute")
+def sync_head():
+    """The newest revision right now. The app asks this once before restoring history: everything up to it is
+    "history" (never auto-downloaded); everything after it is "new"."""
+    res = jsonify({"ok": True, "rev": message_service.sync_head(), "server_time": _server_time()})
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@bp.get("/api/sync/changes")
+@auth_required
+@limiter.limit("240 per minute")
+def sync_changes():
+    """Messages of my conversations changed after the cursor (rev, id). Resumable: send back `next` to continue.
+    Read-only and idempotent; only conversations I am a member of can appear."""
+    rev, mid = _int(request.args.get("rev")), _int(request.args.get("id"))
+    rows, hidden, has_more = message_service.sync_changes(current_user, rev, mid, _int(request.args.get("limit"), 200) or 200)
+    items = []
+    for m in rows:
+        d = message_service.serialize(m, current_user.id)
+        d["hidden"] = m.id in hidden
+        if d["hidden"]:                          # "deleted for me": no content for this person any more
+            d["body"], d["att"] = "", None
+        items.append(d)
+    nxt = {"rev": rows[-1].sync_rev, "id": rows[-1].id} if rows else {"rev": rev, "id": mid}
+    res = jsonify({"ok": True, "messages": items, "next": nxt, "has_more": has_more,
+                   "head": message_service.sync_head(), "server_time": _server_time()})
+    res.headers["Cache-Control"] = "no-store"
+    return res
 
 
 # ------------------------------------------------------------------ one conversation

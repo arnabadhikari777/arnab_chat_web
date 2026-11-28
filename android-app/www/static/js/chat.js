@@ -1,0 +1,684 @@
+/* The chat screen: show messages, send text / files / voice, poll for news, delete. */
+(function () {
+  "use strict";
+  const root = document.getElementById("chat");
+  if (!root) return;
+
+  const $ = (id) => document.getElementById(id);
+  const convId = root.dataset.conversation;
+  const API = "/api/conversations/" + convId;
+  const POLL_ACTIVE = Number(document.body.dataset.pollActive) || 2500;
+  const POLL_IDLE = Number(document.body.dataset.pollIdle) || 12000;
+  const POLL_MAX = Math.max(POLL_ACTIVE, Number(document.body.dataset.pollChatMax) || 5000);
+  const LIMITS = {
+    image: +root.dataset.maxImage, video: +root.dataset.maxVideo,
+    document: Math.max(+root.dataset.maxDocument, +root.dataset.maxFile), voice: +root.dataset.maxVoiceBytes,
+  };
+  const MAX_VOICE = +root.dataset.maxVoice || 300;
+  const t = (...a) => window.app.t(...a);
+  const api = (...a) => window.app.api(...a);
+
+  const scroller = $("chat-scroll"), list = $("chat-messages"), input = $("msg-input");
+  const state = { msgs: new Map(), els: new Map(), lastId: 0, firstId: 0, serverTime: "", hasMore: false,
+                  peer: null, stopped: false, typingAt: 0, typingTimer: null, typingOn: false,
+                  loaded: false, retryOnShow: false };
+
+  /* ---------------------------------------------------------------- tiny DOM helpers */
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;     // textContent only: no HTML from users
+    return n;
+  };
+  const icon = (name, cls) => {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "icon icon--sm " + (cls || ""));
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#" + name);
+    svg.appendChild(use);
+    return svg;
+  };
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+  const mmss = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+  const sizeText = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB");
+  const nearBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 140;
+  const toBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+  const visibleNow = () => !document.hidden && document.hasFocus();
+
+  let emojiOnly = () => false;
+  try {
+    const re = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\ufe0f|\s){1,12}$/u;
+    emojiOnly = (s) => re.test(s) && /\p{Extended_Pictographic}/u.test(s);
+  } catch (e) { /* very old browser: emoji just stay normal size */ }
+
+  /* ---------------------------------------------------------------- one message bubble */
+  let playing = null;                                  // only one voice message plays at a time
+  function voicePlayer(att) {
+    const wrap = el("div", "voice");
+    const audio = el("audio"); audio.src = mediaUrl(att); audio.preload = "metadata";
+    const btn = el("button", "icon-btn icon-btn--primary"); btn.type = "button";
+    btn.setAttribute("aria-label", t("chat.voice_play"));
+    const setIcon = (name) => btn.replaceChildren(icon(name));
+    setIcon("i-play");
+    const seek = el("input", "vr-seek"); seek.type = "range"; seek.min = 0; seek.max = 100; seek.value = 0;
+    seek.setAttribute("aria-label", t("chat.voice_seek"));
+    const time = el("span", "vr-time", mmss(att.dur));
+    const total = () => (isFinite(audio.duration) && audio.duration > 0 ? audio.duration : att.dur || 0);
+    btn.addEventListener("click", () => {
+      if (audio.paused) {
+        if (playing && playing !== audio) playing.pause();
+        playing = audio; audio.play().catch(() => window.app.toast(t("toast.something_wrong"), "error"));
+      } else audio.pause();
+    });
+    audio.addEventListener("play", () => setIcon("i-pause"));
+    audio.addEventListener("pause", () => setIcon("i-play"));
+    audio.addEventListener("ended", () => { seek.value = 0; time.textContent = mmss(total()); });
+    audio.addEventListener("timeupdate", () => {
+      if (total()) seek.value = (audio.currentTime / total()) * 100;
+      time.textContent = mmss(audio.paused && audio.currentTime === 0 ? total() : audio.currentTime);
+    });
+    seek.addEventListener("input", () => { if (total()) audio.currentTime = (seek.value / 100) * total(); });
+    wrap.append(btn, seek, time, audio);
+    return wrap;
+  }
+
+  /* ---- Android app only (bundled UI): media that is not on the phone yet shows its preview and a Download button. ---- */
+  const LF = () => (window.GoppoLocal && window.GoppoLocal.active ? window.GoppoLocal : null);
+  const mediaUrl = (a) => (a && (a.local || a.url)) || "";
+  const notDownloaded = (a) => !!(LF() && a && a.media_id && a.downloaded === false && a.url);
+  function downloadNode(m) {
+    const a = m.att, box = el("div", "media-wrap media-wrap--remote");
+    if (a.thumb && m.type === "image") { const img = el("img"); img.alt = a.name || ""; img.src = a.thumb; img.decoding = "async"; box.appendChild(img); }
+    else if (a.thumb) { const img = el("img"); img.alt = a.name || ""; img.src = a.thumb; box.appendChild(img); }
+    const busy = a.state === "downloading";
+    const label = busy ? t("media.downloading") : a.state === "failed" ? t("media.failed") : t("media.download") + (a.size ? " (" + sizeText(a.size) + ")" : "");
+    const btn = el("button", "btn btn--secondary media-download", label); btn.type = "button"; btn.disabled = busy;
+    btn.addEventListener("click", async () => {
+      if (!navigator.onLine) return window.app.toast(t("media.need_online"), "error");
+      btn.disabled = true; btn.textContent = t("media.downloading");
+      await LF().downloadMedia(a.media_id);                      // the person asked: this is the ONLY way old media is fetched
+    });
+    box.appendChild(btn);
+    return box;
+  }
+
+  /* A picture that cannot load shows a calm message with a Retry button instead of a broken icon. */
+  function imageNode(a) {
+    const wrap = el("div", "media-wrap");
+    const failed = () => {
+      const box = el("div", "media-error");
+      const retryBtn = el("button", "media-error__retry", t("chat.image_retry")); retryBtn.type = "button";
+      retryBtn.addEventListener("click", () => load(true));
+      box.append(icon("i-alert"), el("span", "", t("chat.image_failed")), retryBtn);
+      wrap.replaceChildren(box);
+    };
+    const load = (bust) => {
+      const open = el("button", "media"); open.type = "button";
+      const img = el("img"); img.alt = a.name || ""; img.decoding = "async";
+      img.addEventListener("error", failed);
+      // a retry asks the network again instead of reusing the cached failure (not possible for local blob: previews)
+      const src = mediaUrl(a);
+      img.src = bust && /^https?:/.test(src) ? src + (src.includes("?") ? "&" : "?") + "r=" + Date.now() : src;
+      open.appendChild(img);
+      open.addEventListener("click", () => lightbox(src));
+      wrap.replaceChildren(open);
+    };
+    load(false);
+    return wrap;
+  }
+
+  function content(m) {
+    const box = el("div", "bubble__content");
+    if (m.deleted) { box.appendChild(el("p", "bubble__text bubble--deleted", t("chat.deleted"))); return box; }
+    const a = m.att;
+    if ((m.type === "image" || m.type === "video") && notDownloaded(a)) {
+      box.appendChild(downloadNode(m));
+    } else if (m.type === "image" && a) {
+      box.appendChild(imageNode(a));
+    } else if (m.type === "video" && a) {
+      const v = el("video", "media"); v.src = mediaUrl(a); v.controls = true; v.preload = "metadata"; v.playsInline = true;
+      box.appendChild(v);
+    } else if (m.type === "voice" && a) {
+      box.appendChild(voicePlayer(a));
+    } else if ((m.type === "document" || m.type === "file") && a) {
+      const f = el("a", "filecard"); f.href = mediaUrl(a); f.target = "_blank"; f.rel = "noopener noreferrer"; f.download = a.name || "";
+      const info = el("span", "filecard__info");
+      info.append(el("strong", "", a.name || t("chat.file")), el("span", "muted", a.size ? sizeText(a.size) : t("chat.download")));
+      f.append(icon("i-file"), info, icon("i-download"));
+      box.appendChild(f);
+    }
+    if (m.body) box.appendChild(el("p", "bubble__text" + (m.type === "text" && emojiOnly(m.body) ? " bubble__text--emoji" : ""), m.body));
+    return box;
+  }
+
+  function tick(m) {
+    if (m.status === "sending" || m.status === "waiting") return icon("i-clock");
+    if (m.status === "failed") return icon("i-alert", "tick--failed");
+    if (m.status === "sent") return icon("i-check");
+    return icon("i-check2", m.status === "seen" ? "tick--seen" : "");
+  }
+
+  function build(m) {
+    const row = el("div", "msg " + (m.mine ? "msg--out" : "msg--in"));
+    row.dataset.uuid = m.uuid;
+    const bubble = el("div", "bubble" + (m.mine ? " bubble--out" : ""));
+    row.appendChild(bubble);
+    fill(row, m);
+    return row;
+  }
+
+  /* (Re)draw the inside of a bubble. Voice/video/images are only rebuilt when content changes. */
+  function fill(row, m) {
+    row.dataset.id = m.id || "";
+    row.dataset.day = new Date(m.at).toDateString();
+    const bubble = row.firstChild;
+    const sig = [m.deleted, m.type, m.body, m.att && m.att.url, m.att && m.att.local, m.att && m.att.state, m.progress !== undefined, !!m.id, !!m.pending, m.delete_pending, m.status === "waiting", m.status === "failed"].join("|");
+    if (row._sig !== sig) {
+      row._sig = sig;
+      bubble.replaceChildren(content(m));
+      if (m.progress !== undefined) {
+        const p = el("progress", "upload"); p.max = 100; p.value = m.progress; bubble.appendChild(p);
+      }
+      const meta = el("div", "bubble__meta");
+      if (m.delete_pending) meta.append(el("span", "muted", t("local.deleting")));
+      else if (m.status === "waiting") meta.append(el("span", "muted", t("local.waiting")));
+      else if (m.status === "failed" && LF()) meta.append(el("span", "muted", t("local.failed_tap")));
+      meta.append(el("time", "", window.app.fmtTime(m.at)));
+      row._meta = meta;
+      bubble.appendChild(meta);
+      if (m.id && !m.pending && !m.deleted) {
+        const more = el("button", "bubble__more"); more.type = "button";
+        more.setAttribute("aria-label", t("chat.options")); more.appendChild(icon("i-more"));
+        more.addEventListener("click", () => options(row.dataset.uuid));
+        bubble.appendChild(more);
+      }
+    }
+    const p = bubble.querySelector("progress");
+    if (p && m.progress !== undefined) p.value = m.progress;
+    bubble.classList.toggle("bubble--failed", m.status === "failed");
+    if (row._meta) {
+      row._meta.querySelectorAll("svg").forEach((s) => s.remove());
+      if (m.mine && !m.deleted) row._meta.appendChild(tick(m));
+    }
+    row.onclick = m.status === "failed" ? () => retry(m.uuid) : null;
+  }
+
+  /* ---------------------------------------------------------------- the message list */
+  function separators() {
+    list.querySelectorAll(".day-sep").forEach((n) => n.remove());
+    let prev = "";
+    [...list.querySelectorAll(".msg")].forEach((row) => {
+      if (row.dataset.day !== prev) {
+        prev = row.dataset.day;
+        const iso = state.msgs.get(row.dataset.uuid).at;
+        list.insertBefore(el("div", "day-sep", window.app.fmtDay(iso)), row);
+      }
+    });
+    $("chat-empty").classList.toggle("hidden", state.msgs.size > 0);
+  }
+
+  function put(m, { prepend = false } = {}) {
+    const old = state.msgs.get(m.uuid);
+    const merged = { ...old, ...m, pending: false, progress: undefined };
+    state.msgs.set(m.uuid, merged);
+    let row = state.els.get(m.uuid);
+    if (row) {
+      fill(row, merged);
+      const oldUrl = old && old.att && old.att.url;
+      if (oldUrl && oldUrl.startsWith("blob:") && (!merged.att || merged.att.url !== oldUrl)) URL.revokeObjectURL(oldUrl);
+    } else {
+      row = build(merged);
+      state.els.set(m.uuid, row);
+      if (prepend) list.insertBefore(row, list.querySelector(".msg"));
+      else list.appendChild(row);
+    }
+    if (m.id) {
+      state.lastId = Math.max(state.lastId, m.id);
+      state.firstId = state.firstId ? Math.min(state.firstId, m.id) : m.id;
+    }
+    return row;
+  }
+
+  function byId(id) { return [...state.msgs.values()].find((m) => m.id === id); }
+
+  function applyUpdates(updates) {
+    updates.forEach((u) => {
+      const m = byId(u.id);
+      if (!m) return;
+      if (u.deleted) m.deleted = true; else if (m.mine && u.status) m.status = u.status;
+      fill(state.els.get(m.uuid), m);
+    });
+  }
+
+  /* ---------------------------------------------------------------- header status */
+  function showPeer(peer) {
+    state.peer = peer;
+    const box = $("peer-status");
+    box.textContent = peer.typing ? t("status.typing") : peer.online ? t("status.online") : window.app.lastSeen(peer.last_seen) || "\u00a0";
+    box.classList.toggle("peer--online", !!(peer.online || peer.typing));
+  }
+
+  /* ---------------------------------------------------------------- delivered / seen */
+  async function acknowledge(incoming) {
+    // Opening the page no longer marks anything "delivered": only the phone's push receipt does (server side).
+    // Seeing the messages on screen is still "seen", which also counts as delivered.
+    if (visibleNow()) markSeen();
+  }
+  let seenBusy = false;
+  async function markSeen() {
+    if (!visibleNow() || seenBusy) return;
+    const waiting = [...state.msgs.values()].filter((m) => !m.mine && !m.deleted && m.status !== "seen" && m.id);
+    if (!waiting.length) return;
+    seenBusy = true;
+    const upto = Math.max(...waiting.map((m) => m.id));
+    const res = await api(API + "/seen", { method: "POST", json: { upto } });
+    seenBusy = false;
+    if (res.ok) waiting.forEach((m) => { m.status = "seen"; });
+  }
+
+  /* ---------------------------------------------------------------- loading & polling */
+  async function loadFirst() {
+    await window.app.ready;
+    const res = await api(API + "/messages");
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 401) { state.stopped = true; return; }
+      $("chat-offline").classList.remove("hidden");
+      // retry later; while the tab is hidden just remember to retry when it is shown again
+      setTimeout(() => { if (document.hidden) state.retryOnShow = true; else loadFirst(); }, POLL_IDLE);
+      return;
+    }
+    $("chat-offline").classList.add("hidden");
+    state.serverTime = res.data.server_time; state.hasMore = res.data.has_more;
+    res.data.messages.forEach((m) => put(m));
+    separators(); toBottom(); showPeer(res.data.peer);
+    $("load-older").classList.toggle("hidden", !state.hasMore);
+    state.loaded = true;
+    acknowledge(res.data.messages);
+    activity();
+    schedule();
+  }
+
+  async function loadOlder() {
+    const before = scroller.scrollHeight;
+    const res = await api(API + "/messages?before=" + state.firstId);
+    if (!res.ok) return window.app.toast(res.error.message, "error");
+    [...res.data.messages].reverse().forEach((m) => put(m, { prepend: true }));
+    state.hasMore = res.data.has_more;
+    $("load-older").classList.toggle("hidden", !state.hasMore);
+    separators();
+    scroller.scrollTop += scroller.scrollHeight - before;   // keep the view where it was
+  }
+
+  /* One poll loop for this page: one timer, one request at a time, nothing while the tab is hidden.
+     Fast (POLL_ACTIVE) while something is going on, slower (up to POLL_MAX) when the chat is quiet, and
+     back to fast the moment a message, typing or a tap happens. */
+  let timer = null, inFlight = false, ctl = null, failures = 0, lastActivity = Date.now(), gen = 0;
+  function activity() { lastActivity = Date.now(); }
+  function interval() {
+    const quiet = Date.now() - lastActivity;
+    let ms = quiet < 30000 ? POLL_ACTIVE : quiet < 120000 ? Math.round((POLL_ACTIVE + POLL_MAX) / 2) : POLL_MAX;
+    if (failures) ms = Math.min(30000, ms * Math.pow(2, failures));      // network trouble: back off
+    return ms;
+  }
+
+  async function pollOnce() {          // returns true when the server has more waiting right away
+    ctl = new AbortController();
+    const mine = ctl;
+    const url = API + "/poll?after=" + state.lastId + "&since=" + encodeURIComponent(state.serverTime);
+    const res = await api(url, { signal: mine.signal });
+    if (mine.signal.aborted) return false;            // the tab was hidden meanwhile; the answer is dropped
+    if (res.status === 404 || res.status === 401) { state.stopped = true; return false; }
+    $("chat-offline").classList.toggle("hidden", res.ok);
+    if (!res.ok) { failures = Math.min(failures + 1, 4); return false; }
+    failures = 0;
+    const stick = nearBottom();
+    state.serverTime = res.data.server_time;
+    res.data.messages.forEach((m) => put(m));
+    applyUpdates(res.data.updates);
+    separators(); showPeer(res.data.peer);
+    if (res.data.messages.length || res.data.updates.length || res.data.peer.typing) activity();
+    if (res.data.messages.length) {
+      if (stick) toBottom();
+      acknowledge(res.data.messages);
+    } else markSeen();
+    return !!res.data.more;
+  }
+
+  async function run() {
+    timer = null;
+    if (inFlight || state.stopped || document.hidden || !state.loaded) return;
+    inFlight = true;
+    const mine = ++gen;                               // a newer run (after hide/show) makes this one obsolete
+    try {
+      for (let i = 0; i < 10; i++) {                  // catch up in pages if a lot was missed
+        const more = await pollOnce();
+        if (!more || state.stopped || document.hidden || mine !== gen) break;
+      }
+    } finally { if (mine === gen) inFlight = false; }
+    if (mine === gen) schedule();
+  }
+  function schedule() {
+    clearTimeout(timer); timer = null;
+    if (state.stopped || document.hidden || !state.loaded) return;
+    timer = setTimeout(run, interval());
+  }
+  function syncNow() {                 // tab shown again / window focused / network back: catch up at once
+    if (state.retryOnShow) { state.retryOnShow = false; loadFirst(); return; }
+    if (inFlight || state.stopped || !state.loaded) return;
+    activity();
+    clearTimeout(timer); timer = null;
+    run();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearTimeout(timer); timer = null;
+      if (ctl) ctl.abort();
+      gen++; inFlight = false;
+      stopTyping(true);
+    } else syncNow();
+  });
+  window.addEventListener("focus", () => { markSeen(); syncNow(); });
+  window.addEventListener("online", () => { retryFailed(); syncNow(); });
+  window.addEventListener("pageshow", (e) => { if (e.persisted) syncNow(); });   // back/forward cache, phone unlocked
+
+  /* ---------------------------------------------------------------- sending */
+  function addPending(m) {
+    const stick = true;
+    state.msgs.set(m.uuid, m);
+    const row = build(m);
+    state.els.set(m.uuid, row);
+    list.appendChild(row);
+    separators();
+    if (stick) toBottom();
+  }
+  function setLocal(uuid, patch) {
+    const m = state.msgs.get(uuid);
+    Object.assign(m, patch);
+    fill(state.els.get(uuid), m);
+  }
+  function dropLocal(uuid) {
+    state.els.get(uuid)?.remove(); state.els.delete(uuid); state.msgs.delete(uuid); separators();
+  }
+  function finish(uuid, res, restoreText) {
+    if (res.ok) { put(res.data.message); separators(); return; }
+    if (res.status === 0 || res.status >= 500) { setLocal(uuid, { status: "failed" }); return; }   // can retry
+    window.app.toast(res.error.message, "error");              // the server said no: retrying is pointless
+    dropLocal(uuid);
+    if (restoreText) { input.value = restoreText; sync(); }
+  }
+
+  const sending = new Map();     // uuid -> function that sends it again
+  function sendText(text) {
+    const m = { uuid: uuid(), type: "text", body: text, mine: true, status: "sending", pending: true, at: new Date().toISOString() };
+    addPending(m);
+    const go = async (auto = 0) => {
+      setLocal(m.uuid, { status: "sending" });
+      const res = await api(API + "/messages", { method: "POST", json: { uuid: m.uuid, body: text } });
+      if (!res.ok && (res.status === 0 || res.status >= 500) && typeof auto === "number" && auto < 2) {
+        setTimeout(() => go(auto + 1), auto === 0 ? 1500 : 4000);   // same uuid: the server returns the saved message, never a copy
+        return;
+      }
+      finish(m.uuid, res, text);
+    };
+    sending.set(m.uuid, go); go();
+  }
+
+  function xhr(url, form, onProgress) {
+    if (LF()) return LF().upload(url, form, onProgress);        // Android app: the file goes to the phone's outbox first, then to the server
+    return new Promise((resolve) => {
+      const req = new XMLHttpRequest();
+      req.open("POST", url);
+      req.setRequestHeader("X-CSRFToken", document.querySelector('meta[name="csrf-token"]').content);
+      req.setRequestHeader("Accept", "application/json");
+      req.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
+      req.onload = () => {
+        let data = {};
+        try { data = JSON.parse(req.responseText); } catch (e) { /* not json */ }
+        resolve(req.status < 400 ? { ok: true, status: req.status, data } : { ok: false, status: req.status, error: data.error || { message: t("toast.something_wrong") } });
+      };
+      req.onerror = () => resolve({ ok: false, status: 0, error: { message: t("toast.network_error") } });
+      req.send(form);
+    });
+  }
+
+  function guessType(file, voice) {
+    if (voice) return "voice";
+    if (file.type.startsWith("image/")) return "image";
+    if (file.type.startsWith("video/")) return "video";
+    return "document";
+  }
+
+  function sendFile(file, { voice = false, duration = null, name = null } = {}) {
+    const kind = guessType(file, voice);
+    if (file.size > LIMITS[kind]) {
+      window.app.toast(t("chat.too_large", { size: Math.max(1, Math.floor(LIMITS[kind] / 1048576)) }), "error");
+      return;
+    }
+    const m = { uuid: uuid(), type: kind, body: "", mine: true, status: "sending", pending: true, progress: 0,
+                at: new Date().toISOString(), att: { url: kind === "document" ? "" : URL.createObjectURL(file), name: name || file.name, size: file.size, dur: duration } };
+    addPending(m);
+    const go = async () => {
+      setLocal(m.uuid, { status: "sending", progress: 0 });
+      const form = new FormData();
+      form.append("file", file, name || file.name); form.append("uuid", m.uuid);
+      if (voice) { form.append("voice", "1"); form.append("duration", String(duration || 0)); }
+      const res = await xhr(API + "/messages", form, (p) => setLocal(m.uuid, { progress: p }));
+      if (res.ok) { const row = state.els.get(m.uuid); put({ ...res.data.message }); row && separators(); }
+      else finish(m.uuid, res);
+    };
+    sending.set(m.uuid, go); go();
+  }
+  function retry(u) { const go = sending.get(u); if (go) go(); }
+  /* Connection is back: send again what failed while offline (same uuid = no duplicates). */
+  function retryFailed() {
+    state.msgs.forEach((m) => { if (m.mine && m.status === "failed" && sending.has(m.uuid)) retry(m.uuid); });
+  }
+
+  /* ---------------------------------------------------------------- composer */
+  function sync() {
+    const has = input.value.trim().length > 0;
+    $("btn-send").classList.toggle("hidden", !has);
+    $("btn-mic").classList.toggle("hidden", has);
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 130) + "px";
+  }
+  function sendTyping(on, keepalive) {
+    api(API + "/typing", { method: "POST", json: { typing: on }, keepalive: !!keepalive });
+  }
+  function stopTyping(keepalive) {      // only ever tells the server when it had been told "typing"
+    clearTimeout(state.typingTimer);
+    if (!state.typingOn) return;
+    state.typingOn = false; state.typingAt = 0;
+    sendTyping(false, keepalive);
+  }
+  input.addEventListener("input", () => {
+    sync();
+    activity();
+    const now = Date.now();
+    if (!input.value.trim()) { stopTyping(); return; }
+    if (!state.typingOn || now - state.typingAt > 3000) { state.typingAt = now; state.typingOn = true; sendTyping(true); }
+    clearTimeout(state.typingTimer);
+    state.typingTimer = setTimeout(() => stopTyping(), 4000);
+  });
+  /* Computer: Enter sends, Shift+Enter makes a new line. Phone/tablet (touch): Enter stays a new line,
+     the send button is used. Ctrl/Cmd+Enter always sends. */
+  const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+    if (e.ctrlKey || e.metaKey || (!e.shiftKey && !isTouch)) { e.preventDefault(); $("composer").requestSubmit(); }
+  });
+
+  /* Keep the whole chat (and the typing box) inside the visible screen when the keyboard opens. */
+  const vv = window.visualViewport;
+  function fitScreen() {
+    if (!vv) return;
+    root.style.setProperty("--vvh", Math.round(vv.height) + "px");
+    window.scrollTo(0, 0);
+    scroller.scrollTop = scroller.scrollHeight;
+  }
+  if (vv) { vv.addEventListener("resize", fitScreen); vv.addEventListener("scroll", () => window.scrollTo(0, 0)); }
+  $("composer").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = ""; sync();
+    stopTyping();
+    sendText(text);
+    activity();
+    input.focus();
+  });
+
+  /* emoji */
+  const EMOJI = "😀 😁 😂 🤣 😊 😍 😘 😎 🤗 🤔 😅 😉 🙂 😇 🥰 😋 😜 🤩 😢 😭 😡 😱 😴 🤝 👍 👎 👏 🙏 💪 👋 🙌 ✌️ ❤️ 💔 🔥 ✨ 🎉 🎁 🌹 ☕ 🍕 🎂 ⚽ 🚀 🌙 ☀️ ⭐ 💯 ✅ ❌ 😐 🥳 😬 🤭 🙄 😏 🥺 😤 🤒 🤯 😌".split(" ");
+  const panel = $("emoji-panel");
+  EMOJI.forEach((e) => {
+    const b = el("button", "emoji", e); b.type = "button";
+    b.addEventListener("click", () => {
+      const s = input.selectionStart ?? input.value.length, f = input.selectionEnd ?? s;
+      input.value = input.value.slice(0, s) + e + input.value.slice(f);
+      input.focus(); input.setSelectionRange(s + e.length, s + e.length); sync();
+    });
+    panel.appendChild(b);
+  });
+  $("btn-emoji").addEventListener("click", () => { $("attach-menu").classList.add("hidden"); panel.classList.toggle("hidden"); });
+
+  /* attach */
+  $("btn-attach").addEventListener("click", () => { panel.classList.add("hidden"); $("attach-menu").classList.toggle("hidden"); });
+  root.querySelectorAll("[data-attach]").forEach((b) => b.addEventListener("click", () => {
+    $("attach-menu").classList.add("hidden");
+    (b.dataset.attach === "media" ? $("file-media") : $("file-doc")).click();
+  }));
+  [$("file-media"), $("file-doc")].forEach((inp) => inp.addEventListener("change", () => {
+    [...inp.files].forEach((f) => sendFile(f));
+    inp.value = "";
+  }));
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#attach-menu, #btn-attach")) $("attach-menu").classList.add("hidden");
+    if (!e.target.closest("#emoji-panel, #btn-emoji")) panel.classList.add("hidden");
+  });
+
+  /* ---------------------------------------------------------------- voice messages */
+  const vr = { rec: null, blob: null, audio: null, seconds: 0, ext: "webm", url: "" };
+  const show = (id, on) => $(id).classList.toggle("hidden", !on);
+  function voiceUI(mode) {          // mode: off | recording | preview
+    show("composer-default", mode === "off"); show("composer-voice", mode !== "off");
+    show("vr-recording", mode === "recording"); show("vr-preview", mode === "preview");
+    show("vr-pause", mode === "recording"); show("vr-stop", mode === "recording"); show("vr-send", mode === "preview");
+    $("vr-dot").classList.toggle("vr-dot--live", mode === "recording");
+  }
+  function voiceReset() {
+    if (vr.rec) { vr.rec.cancel(); vr.rec = null; }
+    if (vr.audio) { vr.audio.pause(); vr.audio = null; }
+    if (vr.url) URL.revokeObjectURL(vr.url);
+    vr.blob = null; vr.url = ""; $("vr-time").textContent = "0:00";
+    voiceUI("off");
+  }
+  const setIcon = (btn, name) => { btn.replaceChildren(icon(name)); };
+
+  $("btn-mic").addEventListener("click", async () => {
+    await window.app.ready;
+    vr.rec = new VoiceRecorder({
+      maxSeconds: MAX_VOICE,
+      onTick: (s) => { $("vr-time").textContent = mmss(s); },
+      onLimit: () => { window.app.toast(t("chat.voice_limit")); finishRecording(); },
+    });
+    try { await vr.rec.start(); }
+    catch (e) {
+      vr.rec = null;
+      window.app.toast(t({ denied: "chat.mic_denied", missing: "chat.mic_missing", unsupported: "chat.mic_unsupported" }[e.code] || "chat.mic_failed"), "error");
+      return;
+    }
+    setIcon($("vr-pause"), "i-pause"); $("vr-state").textContent = t("chat.recording"); voiceUI("recording");
+  });
+  $("vr-pause").addEventListener("click", () => {
+    if (!vr.rec) return;
+    if (vr.rec.state === "recording") { vr.rec.pause(); setIcon($("vr-pause"), "i-play"); $("vr-state").textContent = t("chat.paused"); $("vr-dot").classList.remove("vr-dot--live"); $("vr-pause").setAttribute("aria-label", t("chat.voice_resume")); }
+    else { vr.rec.resume(); setIcon($("vr-pause"), "i-pause"); $("vr-state").textContent = t("chat.recording"); $("vr-dot").classList.add("vr-dot--live"); $("vr-pause").setAttribute("aria-label", t("chat.voice_pause")); }
+  });
+  async function finishRecording() {
+    if (!vr.rec) return;
+    try {
+      const out = await vr.rec.stop();
+      vr.rec = null;
+      if (out.seconds < 1) { voiceReset(); return; }            // an accidental tap
+      vr.blob = out.blob; vr.seconds = out.seconds; vr.ext = out.ext;
+      vr.url = URL.createObjectURL(out.blob);
+      vr.audio = new Audio(vr.url);
+      const seek = $("vr-seek"), play = $("vr-play");
+      seek.value = 0; $("vr-preview-time").textContent = mmss(vr.seconds); setIcon(play, "i-play");
+      vr.audio.ontimeupdate = () => { seek.value = (vr.audio.currentTime / vr.seconds) * 100; $("vr-preview-time").textContent = mmss(vr.audio.currentTime); };
+      vr.audio.onended = () => { setIcon(play, "i-play"); seek.value = 0; $("vr-preview-time").textContent = mmss(vr.seconds); };
+      voiceUI("preview");
+    } catch (e) { voiceReset(); window.app.toast(t("chat.mic_failed"), "error"); }
+  }
+  $("vr-stop").addEventListener("click", finishRecording);
+  $("vr-play").addEventListener("click", () => {
+    if (!vr.audio) return;
+    if (vr.audio.paused) { vr.audio.play(); setIcon($("vr-play"), "i-pause"); } else { vr.audio.pause(); setIcon($("vr-play"), "i-play"); }
+  });
+  $("vr-seek").addEventListener("input", () => { if (vr.audio) vr.audio.currentTime = ($("vr-seek").value / 100) * vr.seconds; });
+  $("vr-delete").addEventListener("click", voiceReset);
+  $("vr-send").addEventListener("click", () => {
+    if (!vr.blob) return;
+    const file = new File([vr.blob], "voice." + vr.ext, { type: vr.blob.type });
+    if (file.size > LIMITS.voice) {
+      window.app.toast(t("chat.too_large", { size: Math.max(1, Math.floor(LIMITS.voice / 1048576)) }), "error");
+      return;
+    }
+    const seconds = vr.seconds;
+    voiceReset();
+    sendFile(file, { voice: true, duration: seconds, name: file.name });
+  });
+  window.addEventListener("pagehide", () => { stopTyping(true); if (vr.rec) vr.rec.cancel(); });   // never leave the mic on
+
+  /* ---------------------------------------------------------------- delete & lightbox */
+  function options(u) {
+    const m = state.msgs.get(u);
+    if (!m || !m.id) return;
+    const dlg = el("dialog", "dialog");
+    dlg.appendChild(el("h3", "", t("chat.options")));
+    const actions = el("div", "dialog__actions");
+    const choose = (scope, label) => {
+      const b = el("button", "btn " + (scope === "everyone" ? "btn--danger" : "btn--secondary"), label); b.type = "button";
+      b.addEventListener("click", async () => {
+        dlg.close(); dlg.remove();
+        const yes = await window.app.confirmDialog({ title: t("dialog.delete_message.title"), text: label, confirmLabel: t("common.delete"), danger: true });
+        if (yes) removeMessage(m, scope);
+      });
+      actions.appendChild(b);
+    };
+    choose("me", t("chat.delete_for_me"));
+    if (m.mine && !m.deleted) choose("everyone", t("chat.delete_for_everyone"));
+    const cancel = el("button", "btn btn--ghost", t("common.cancel")); cancel.type = "button";
+    cancel.addEventListener("click", () => { dlg.close(); dlg.remove(); });
+    actions.appendChild(cancel);
+    dlg.appendChild(actions);
+    dlg.addEventListener("cancel", () => dlg.remove());
+    document.body.appendChild(dlg); dlg.showModal();
+  }
+  async function removeMessage(m, scope) {
+    const res = await api("/api/messages/" + m.id + "/delete", { method: "POST", json: { scope } });
+    if (!res.ok) return window.app.toast(res.error.message, "error");
+    if (scope === "me") dropLocal(m.uuid);
+    else if (res.data && res.data.queued) { m.delete_pending = true; fill(state.els.get(m.uuid), m); }   // app: queued until the SERVER confirms
+    else { m.deleted = true; fill(state.els.get(m.uuid), m); }
+  }
+  function lightbox(url) {
+    const dlg = el("dialog", "lightbox");
+    const img = el("img"); img.src = url; img.alt = "";
+    dlg.appendChild(img);
+    dlg.addEventListener("click", () => { dlg.close(); dlg.remove(); });
+    document.body.appendChild(dlg); dlg.showModal();
+  }
+
+  /* Android app: a download finished / the local database changed -> refresh just that bubble. */
+  window.addEventListener("goppo:media", async (e) => {
+    const lf = LF(); const d = e.detail || {}; if (!lf || !d.uuid || !state.msgs.has(d.uuid)) return;
+    const mm = await lf.message(d.uuid); if (mm) put(mm);
+  });
+  window.addEventListener("goppo:local-changed", () => { activity(); if (!inFlight) run(); });
+
+  $("load-older").addEventListener("click", loadOlder);
+  sync();
+  loadFirst();
+})();

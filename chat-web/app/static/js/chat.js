@@ -55,7 +55,7 @@
   let playing = null;                                  // only one voice message plays at a time
   function voicePlayer(att) {
     const wrap = el("div", "voice");
-    const audio = el("audio"); audio.src = att.url; audio.preload = "metadata";
+    const audio = el("audio"); audio.src = mediaUrl(att); audio.preload = "metadata";
     const btn = el("button", "icon-btn icon-btn--primary"); btn.type = "button";
     btn.setAttribute("aria-label", t("chat.voice_play"));
     const setIcon = (name) => btn.replaceChildren(icon(name));
@@ -82,6 +82,26 @@
     return wrap;
   }
 
+  /* ---- Android app only (bundled UI): media that is not on the phone yet shows its preview and a Download button. ---- */
+  const LF = () => (window.GoppoLocal && window.GoppoLocal.active ? window.GoppoLocal : null);
+  const mediaUrl = (a) => (a && (a.local || a.url)) || "";
+  const notDownloaded = (a) => !!(LF() && a && a.media_id && a.downloaded === false && a.url);
+  function downloadNode(m) {
+    const a = m.att, box = el("div", "media-wrap media-wrap--remote");
+    if (a.thumb && m.type === "image") { const img = el("img"); img.alt = a.name || ""; img.src = a.thumb; img.decoding = "async"; box.appendChild(img); }
+    else if (a.thumb) { const img = el("img"); img.alt = a.name || ""; img.src = a.thumb; box.appendChild(img); }
+    const busy = a.state === "downloading";
+    const label = busy ? t("media.downloading") : a.state === "failed" ? t("media.failed") : t("media.download") + (a.size ? " (" + sizeText(a.size) + ")" : "");
+    const btn = el("button", "btn btn--secondary media-download", label); btn.type = "button"; btn.disabled = busy;
+    btn.addEventListener("click", async () => {
+      if (!navigator.onLine) return window.app.toast(t("media.need_online"), "error");
+      btn.disabled = true; btn.textContent = t("media.downloading");
+      await LF().downloadMedia(a.media_id);                      // the person asked: this is the ONLY way old media is fetched
+    });
+    box.appendChild(btn);
+    return box;
+  }
+
   /* A picture that cannot load shows a calm message with a Retry button instead of a broken icon. */
   function imageNode(a) {
     const wrap = el("div", "media-wrap");
@@ -97,9 +117,10 @@
       const img = el("img"); img.alt = a.name || ""; img.decoding = "async";
       img.addEventListener("error", failed);
       // a retry asks the network again instead of reusing the cached failure (not possible for local blob: previews)
-      img.src = bust && /^https?:/.test(a.url) ? a.url + (a.url.includes("?") ? "&" : "?") + "r=" + Date.now() : a.url;
+      const src = mediaUrl(a);
+      img.src = bust && /^https?:/.test(src) ? src + (src.includes("?") ? "&" : "?") + "r=" + Date.now() : src;
       open.appendChild(img);
-      open.addEventListener("click", () => lightbox(a.url));
+      open.addEventListener("click", () => lightbox(src));
       wrap.replaceChildren(open);
     };
     load(false);
@@ -110,15 +131,17 @@
     const box = el("div", "bubble__content");
     if (m.deleted) { box.appendChild(el("p", "bubble__text bubble--deleted", t("chat.deleted"))); return box; }
     const a = m.att;
-    if (m.type === "image" && a) {
+    if ((m.type === "image" || m.type === "video") && notDownloaded(a)) {
+      box.appendChild(downloadNode(m));
+    } else if (m.type === "image" && a) {
       box.appendChild(imageNode(a));
     } else if (m.type === "video" && a) {
-      const v = el("video", "media"); v.src = a.url; v.controls = true; v.preload = "metadata"; v.playsInline = true;
+      const v = el("video", "media"); v.src = mediaUrl(a); v.controls = true; v.preload = "metadata"; v.playsInline = true;
       box.appendChild(v);
     } else if (m.type === "voice" && a) {
       box.appendChild(voicePlayer(a));
     } else if ((m.type === "document" || m.type === "file") && a) {
-      const f = el("a", "filecard"); f.href = a.url; f.target = "_blank"; f.rel = "noopener noreferrer"; f.download = a.name || "";
+      const f = el("a", "filecard"); f.href = mediaUrl(a); f.target = "_blank"; f.rel = "noopener noreferrer"; f.download = a.name || "";
       const info = el("span", "filecard__info");
       info.append(el("strong", "", a.name || t("chat.file")), el("span", "muted", a.size ? sizeText(a.size) : t("chat.download")));
       f.append(icon("i-file"), info, icon("i-download"));
@@ -129,7 +152,7 @@
   }
 
   function tick(m) {
-    if (m.status === "sending") return icon("i-clock");
+    if (m.status === "sending" || m.status === "waiting") return icon("i-clock");
     if (m.status === "failed") return icon("i-alert", "tick--failed");
     if (m.status === "sent") return icon("i-check");
     return icon("i-check2", m.status === "seen" ? "tick--seen" : "");
@@ -149,14 +172,18 @@
     row.dataset.id = m.id || "";
     row.dataset.day = new Date(m.at).toDateString();
     const bubble = row.firstChild;
-    const sig = [m.deleted, m.type, m.body, m.att && m.att.url, m.progress !== undefined, !!m.id, !!m.pending].join("|");
+    const sig = [m.deleted, m.type, m.body, m.att && m.att.url, m.att && m.att.local, m.att && m.att.state, m.progress !== undefined, !!m.id, !!m.pending, m.delete_pending, m.status === "waiting", m.status === "failed"].join("|");
     if (row._sig !== sig) {
       row._sig = sig;
       bubble.replaceChildren(content(m));
       if (m.progress !== undefined) {
         const p = el("progress", "upload"); p.max = 100; p.value = m.progress; bubble.appendChild(p);
       }
-      const meta = el("div", "bubble__meta"); meta.append(el("time", "", window.app.fmtTime(m.at)));
+      const meta = el("div", "bubble__meta");
+      if (m.delete_pending) meta.append(el("span", "muted", t("local.deleting")));
+      else if (m.status === "waiting") meta.append(el("span", "muted", t("local.waiting")));
+      else if (m.status === "failed" && LF()) meta.append(el("span", "muted", t("local.failed_tap")));
+      meta.append(el("time", "", window.app.fmtTime(m.at)));
       row._meta = meta;
       bubble.appendChild(meta);
       if (m.id && !m.pending && !m.deleted) {
@@ -397,6 +424,7 @@
   }
 
   function xhr(url, form, onProgress) {
+    if (LF()) return LF().upload(url, form, onProgress);        // Android app: the file goes to the phone's outbox first, then to the server
     return new Promise((resolve) => {
       const req = new XMLHttpRequest();
       req.open("POST", url);
@@ -632,6 +660,7 @@
     const res = await api("/api/messages/" + m.id + "/delete", { method: "POST", json: { scope } });
     if (!res.ok) return window.app.toast(res.error.message, "error");
     if (scope === "me") dropLocal(m.uuid);
+    else if (res.data && res.data.queued) { m.delete_pending = true; fill(state.els.get(m.uuid), m); }   // app: queued until the SERVER confirms
     else { m.deleted = true; fill(state.els.get(m.uuid), m); }
   }
   function lightbox(url) {
@@ -641,6 +670,13 @@
     dlg.addEventListener("click", () => { dlg.close(); dlg.remove(); });
     document.body.appendChild(dlg); dlg.showModal();
   }
+
+  /* Android app: a download finished / the local database changed -> refresh just that bubble. */
+  window.addEventListener("goppo:media", async (e) => {
+    const lf = LF(); const d = e.detail || {}; if (!lf || !d.uuid || !state.msgs.has(d.uuid)) return;
+    const mm = await lf.message(d.uuid); if (mm) put(mm);
+  });
+  window.addEventListener("goppo:local-changed", () => { activity(); if (!inFlight) run(); });
 
   $("load-older").addEventListener("click", loadOlder);
   sync();

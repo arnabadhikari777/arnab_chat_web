@@ -24,14 +24,16 @@ object GoppoRuntime {
     /** Path of the page the WebView is showing ("/chat/12"), or null. */
     @Volatile var currentPath: String? = null
 
-    /** Like [configure] but reads `server.url` from Capacitor's bundled config, so it works with no activity (FCM, receivers). */
+    /** Like [configure] but reads the backend URL from the bundled goppo-backend.json, so it works with no activity (FCM, receivers). */
     fun ensureConfigured(context: Context): UrlPolicy? {
         policy?.let { return it }
         return try {
-            val text = context.applicationContext.assets.open("capacitor.config.json").bufferedReader().use { it.readText() }
-            configure(JSONObject(text).getJSONObject("server").getString("url"))
+            // The UI is bundled in the APK (no server.url). The BACKEND the pages talk to comes from assets/goppo-backend.json,
+            // written by the frontend build (tools/build_android_web.py). It is a public URL, never a secret.
+            val text = context.applicationContext.assets.open("goppo-backend.json").bufferedReader().use { it.readText() }
+            configure(JSONObject(text).getString("backendUrl"))
         } catch (e: Exception) {
-            Logger.error("Goppo: cannot read server.url from capacitor.config.json", e)
+            Logger.error("Goppo: cannot read backendUrl from goppo-backend.json", e)
             null
         }
     }

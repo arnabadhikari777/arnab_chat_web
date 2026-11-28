@@ -9,9 +9,10 @@ var capacitorExports=function(e){"use strict";var t;e.ExceptionCode=void 0,(t=e.
     var cap = window.Capacitor;
     if (!cap || typeof cap.registerPlugin !== "function") return;
     var headers = cap.PluginHeaders || [];
-    var present = false;
-    for (var i = 0; i < headers.length; i++) if (headers[i] && headers[i].name === "GoppoNative") present = true;
-    if (!present) return;                       // native plugin not part of this app: leave the page alone
-    cap.registerPlugin("GoppoNative");          // sets Capacitor.Plugins.GoppoNative
+    ["GoppoNative", "GoppoLocal"].forEach(function (name) {
+      var present = false;
+      for (var i = 0; i < headers.length; i++) if (headers[i] && headers[i].name === name) present = true;
+      if (present) cap.registerPlugin(name);    // sets Capacitor.Plugins.<name>; a plugin missing from this app is left alone
+    });
   } catch (e) { /* never break the page */ }
 })();

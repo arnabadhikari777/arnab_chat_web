@@ -284,3 +284,27 @@ test("ICE failure on the caller side triggers an ICE-restart offer", async (t) =
   await until(() => lastWs(e).sent.filter((m) => m.type === "offer").length === 2, 1000, "restart offer");
   assert.match(lastWs(e).sent.filter((m) => m.type === "offer")[1].payload.sdp, /restart/);
 });
+
+test("timer: a new call never shows the previous call's duration; a repeated 'connected' does not restart the timer", async (t) => {
+  const e = makeEnv({ peerOnline: true }); t.after(e.close);
+  await until(() => e.G && e.G._state.cfg, 500);
+  e.G.startVoice(7, peer);
+  await until(() => e.pcs[0], 3000);
+  e.pcs[0].setState("connected");
+  await until(() => e.screen() === "active", 500);
+  const first = e.G._state.call;
+  const timerId = first.timer;
+  assert.ok(timerId, "timer running");
+  e.pcs[0].setState("connected");                        // repeated connected event
+  assert.equal(first.timer, timerId, "timer not restarted");
+  first.connectedAt -= 125000;                          // pretend the call lasted 2 min 5 s
+  e.$("goppo-btn-end").click();
+  await until(() => e.screen() === "ended", 1500);
+  assert.equal(first.timer, null, "interval stopped");
+  e.$("goppo-btn-close").click();
+  assert.equal(e.$("goppo-call-timer").hidden, true, "closing the call clears the timer");
+  e.G.startVoice(7, peer);
+  await until(() => e.screen() === "calling" || e.screen() === "wake", 1500);
+  assert.equal(e.$("goppo-call-timer").hidden, true, "ringing/connecting screen shows no duration");
+  assert.equal(e.$("goppo-call-timer").textContent, "00:00", "no stale text");
+});

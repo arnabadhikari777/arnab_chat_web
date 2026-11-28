@@ -30,7 +30,7 @@ Do not commit `.env`, `native/`, `target/`, `node_modules/`.
 | Variable | Required | Value |
 |---|---|---|
 | `CALLING_HMAC_SECRET` | yes | ≥32 chars, **identical** to PythonAnywhere |
-| `ALLOWED_ORIGINS` | yes | `https://YOURNAME.pythonanywhere.com` (add `http://localhost:5000` only for local testing) |
+| `ALLOWED_ORIGINS` | yes | `https://YOURNAME.pythonanywhere.com,https://localhost` - the second origin is the Android app (its pages are served from the APK as `https://localhost`); without it calls from the app are refused. Add `http://localhost:5000` only for local testing |
 | `STUN_URLS` | no | default `stun:stun.l.google.com:19302` |
 | `TURN_URLS` | recommended | `turn:HOST:3478?transport=udp,turn:HOST:3478?transport=tcp,turns:HOST:5349?transport=tcp` |
 | `TURN_SHARED_SECRET` | with TURN | coturn `static-auth-secret` (server derives short-lived credentials) |

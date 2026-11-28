@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  
+  <meta name="theme-color" content="#0b6e78">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Goppo">
+  
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+  <title>সেটিংস - Goppo</title>
+  
+  
+  <link rel="stylesheet" href="/static/fonts/fonts.css">
+  <script src="/static/js/bundle-boot.js"></script>
+  
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body data-auth="1" data-poll-active="2500" data-poll-idle="12000" data-poll-chat-max="5000" data-poll-list="5000">
+  <svg class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+  <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4"/><path d="M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 6 2 7.5 2 7.5H4S6 15 6 9z"/><path d="M10 20a2 2 0 0 0 4 0"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3l-7 18-4-7-7-4 18-7z"/><path d="M21 3L10 14"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.5 17.2a1.7 1.7 0 0 1-2.4-2.4L14.5 7.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-check2" viewBox="0 0 24 24"><path d="M2 12.5L6.5 17 15 8.5"/><path d="M10 15.5l1.5 1.5L21 7.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 4H5v16h4M16 8l4 4-4 4M20 12H9"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5v.5M15 9.5v.5"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 6v.01M12 12v.01M12 18v.01"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+  <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+</svg>
+  <div class="app">
+    
+  
+<header class="topbar">
+  <span class="topbar__title">সেটিংস</span>
+  
+<a class="icon-btn topbar__notice" href="https://arnabchatweb.pythonanywhere.com/notices" aria-label="নোটিশ বক্স">
+  <svg class="icon"><use href="#i-bell"/></svg>
+  <span class="nav-badge badge hidden" data-badge="notices"></span>
+</a>
+</header>
+<main class="page">
+  
+  
+
+  <section class="stack">
+    <h3>অ্যাকাউন্ট</h3>
+    <a class="btn btn--secondary btn--block" href="https://arnabchatweb.pythonanywhere.com/settings/profile"><svg class="icon"><use href="#i-user"/></svg>প্রোফাইল এডিট করুন</a>
+    <a class="btn btn--secondary btn--block" href="https://arnabchatweb.pythonanywhere.com/settings/password"><svg class="icon"><use href="#i-lock"/></svg>পাসওয়ার্ড বদলান</a>
+  </section>
+
+  
+  <section class="stack">
+    <h3>অ্যাকাউন্টের প্রাইভেসি / নোটিফিকেশন</h3>
+    <a class="btn btn--secondary btn--block" href="https://arnabchatweb.pythonanywhere.com/settings?hosted=1" data-needs-online>গোপনীয়তা ও নোটিফিকেশনের অপশন (অনলাইন)</a>
+    <p class="field__hint">এই অপশনগুলোর জন্য ওয়েবসাইটের পেজ খুলবে। ইন্টারনেট দরকার।</p>
+  </section>
+  
+
+  <section class="stack" id="android-settings" hidden>
+    <h3>অ্যান্ড্রয়েড অ্যাপের নোটিফিকেশন</h3>
+    <p class="muted">কল আপনার ফোনের রিংটোনে বাজে এবং বার্তায় আপনার নোটিফিকেশন শব্দ ব্যবহার হয়। দুটোই অ্যান্ড্রয়েডের নিজস্ব সেটিংসে বদলানো যায়।</p>
+    <p class="field__hint hidden" data-android-status></p>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="allow">নোটিফিকেশন অনুমতি দিন</button>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="calls">ইনকামিং কলের শব্দ</button>
+    <button type="button" class="btn btn--secondary btn--block" data-android-open="messages">বার্তার শব্দ</button>
+    <button type="button" class="btn btn--secondary btn--block hidden" data-android-open="fullScreenIntent">লক স্ক্রিনে কল দেখান</button>
+  </section>
+
+  
+  <section class="stack" id="media-settings" hidden>
+    <h3>ছবি ও ভিডিও</h3>
+    <p class="muted">এই ফোন নিজে থেকে কী ডাউনলোড করবে তা ঠিক করুন। আপনার পছন্দ শুধু এই ফোনে প্রযোজ্য।</p>
+    <label class="choice"><input type="checkbox" id="media-auto">
+      <span class="choice__body"><strong>স্বয়ংক্রিয় ডাউনলোড</strong><span class="field__hint">মাস্টার সুইচ। বন্ধ থাকলে কিছুই নিজে থেকে ডাউনলোড হবে না।</span></span></label>
+    <label class="choice"><input type="checkbox" id="media-photos">
+      <span class="choice__body"><strong>নতুন ছবি</strong><span class="field__hint">নতুন আসা ছবি নিজে থেকে ডাউনলোড করুন।</span></span></label>
+    <label class="choice"><input type="checkbox" id="media-videos">
+      <span class="choice__body"><strong>নতুন ভিডিও</strong><span class="field__hint">নতুন আসা ভিডিও নিজে থেকে ডাউনলোড করুন।</span></span></label>
+    <p class="field__hint">পুরনো ছবি ও ভিডিও (যেমন অ্যাপ নতুন করে ইনস্টল করার পর) নিজে থেকে ডাউনলোড হয় না: ট্যাপ করলে ডাউনলোড হবে।</p>
+    <p class="muted"><strong>এই ফোনে ডাউনলোড করা মিডিয়া:</strong> <span id="media-usage">-</span></p>
+    <button type="button" class="btn btn--secondary btn--block" id="media-clear">ডাউনলোড করা মিডিয়া মুছুন</button>
+    <p class="field__hint">শুধু এই ফোনে রাখা কপি মুছে যাবে। আসল ফাইল সার্ভারে ও চ্যাটে থাকবে; আবার ডাউনলোড করা যাবে।</p>
+  </section>
+  
+  
+
+  <section class="stack">
+    <h3>ভাষা</h3>
+    <nav class="lang-switch lang-switch--wide" aria-label="Language">
+      <a href="https://arnabchatweb.pythonanywhere.com/lang/en?next=/settings" >English</a>
+      <a href="https://arnabchatweb.pythonanywhere.com/lang/bn?next=/settings" aria-current="true">বাংলা</a>
+    </nav>
+  </section>
+  
+  <button class="btn btn--ghost btn--block" type="button" id="bundle-logout"><svg class="icon"><use href="#i-logout"/></svg>লগ আউট</button>
+  
+</main>
+
+<nav class="bottom-nav" aria-label="Main">
+  <a href="/messages.html" ><span class="nav-icon"><svg class="icon"><use href="#i-chat"/></svg><span class="nav-badge hidden" data-badge="messages"></span></span>মেসেজ</a>
+  <a href="https://arnabchatweb.pythonanywhere.com/people" ><span class="nav-icon"><svg class="icon"><use href="#i-people"/></svg></span>মানুষ</a>
+  <a href="https://arnabchatweb.pythonanywhere.com/profile" ><span class="nav-icon"><svg class="icon"><use href="#i-user"/></svg></span>প্রোফাইল</a>
+  <a href="/settings.html" aria-current="page"><span class="nav-icon"><svg class="icon"><use href="#i-settings"/></svg></span>সেটিংস</a>
+</nav>
+
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/js/platform.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+  <script src="/static/js/local-first.js" defer></script>
+  <script src="/static/js/badge.js" defer></script>
+  <script src="/static/js/push.js" defer></script>
+  <script src="/static/js/calling.js" defer></script>
+  <script src="/static/js/device.js" defer></script>
+  
+</body>
+</html>

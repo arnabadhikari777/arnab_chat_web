@@ -82,4 +82,42 @@ class UrlPolicyTest {
         try { UrlPolicy("http://arnabchatweb.pythonanywhere.com") } catch (_: IllegalArgumentException) { failed = true }
         assertTrue(failed)
     }
+
+    // ---------------------------------------------------------------- Task 2: bundled UI
+    @Test fun localOriginAndBackendOriginAreBothFirstParty() {
+        assertEquals(UrlDecision.INTERNAL, d("https://localhost/messages.html"))
+        assertTrue(policy.isLocalOrigin("https://localhost/chat.html?c=1")); assertFalse(policy.isBackendOrigin("https://localhost/"))
+        assertTrue(policy.isBackendOrigin("https://arnabchatweb.pythonanywhere.com/people")); assertFalse(policy.isLocalOrigin("https://arnabchatweb.pythonanywhere.com/"))
+        assertEquals("https://localhost", policy.localOriginString)
+    }
+
+    @Test fun lookAlikeLocalOriginsAreNotTrusted() {
+        assertEquals(UrlDecision.EXTERNAL_BROWSER, d("https://localhost.evil.com/"))
+        assertEquals(UrlDecision.BLOCKED, d("http://localhost/"))                 // cleartext local origin is not the bundled one
+        assertFalse(policy.isAppOrigin("https://localhost:8443/"))
+        assertFalse(policy.isAppOrigin("https://evil.com/https://localhost/"))
+    }
+
+    @Test fun hostedWebsitePathsWithABundledTwinOpenLocally() {
+        assertEquals("messages.html", LocalRoutes.toLocal("/messages"))
+        assertEquals("messages.html", LocalRoutes.toLocal("/"))
+        assertEquals("chat.html?c=12", LocalRoutes.toLocal("/chat/12"))
+        assertEquals("chat.html?c=12", LocalRoutes.toLocal("/chat/12/?x=1"))
+        assertEquals("settings.html", LocalRoutes.toLocal("/settings/"))
+        assertEquals("login.html", LocalRoutes.toLocal("/login"))
+        assertNull(LocalRoutes.toLocal("/settings/?hosted=1"))           // the website's own settings page (no redirect loop)
+        assertNull(LocalRoutes.toLocal("/people")); assertNull(LocalRoutes.toLocal("/chat/abc")); assertNull(LocalRoutes.toLocal("/admin/users")); assertNull(LocalRoutes.toLocal(null))
+    }
+
+    @Test fun bundledPagesMapBackToSitePaths() {
+        assertEquals("/chat/12", LocalRoutes.toSite("/chat.html", "c=12")); assertEquals("/messages", LocalRoutes.toSite("/messages.html", null))
+        assertNull(LocalRoutes.toSite("/chat.html", "c=x")); assertNull(LocalRoutes.toSite("/other.html", null))
+    }
+
+    @Test fun rangeHeaderParsing() {
+        assertEquals(0L to 99L, RangeHeader.parse("bytes=0-99", 1000)); assertEquals(500L to 999L, RangeHeader.parse("bytes=500-", 1000))
+        assertEquals(900L to 999L, RangeHeader.parse("bytes=-100", 1000)); assertEquals(0L to 999L, RangeHeader.parse("bytes=0-5000", 1000))
+        assertNull(RangeHeader.parse(null, 1000)); assertNull(RangeHeader.parse("bytes=2000-3000", 1000)); assertNull(RangeHeader.parse("bytes=5-1", 1000))
+        assertNull(RangeHeader.parse("bytes=0-1,5-9", 1000)); assertNull(RangeHeader.parse("items=0-1", 1000))
+    }
 }

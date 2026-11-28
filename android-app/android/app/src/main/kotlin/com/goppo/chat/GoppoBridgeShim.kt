@@ -23,7 +23,7 @@ object GoppoBridgeShim {
 
     /** @return true if the script was registered (the caller must then restart the first page load). */
     fun install(bridge: Bridge): Boolean {
-        val policy = GoppoRuntime.configure(bridge.serverUrl) ?: return false
+        val policy = GoppoRuntime.ensureConfigured(bridge.context) ?: return false
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             // Very old WebView: the website still works as in a browser (platform.js falls back); no native bridge.
             Logger.warn("Goppo: WebView lacks DOCUMENT_START_SCRIPT; native bridge not injected")
@@ -31,7 +31,7 @@ object GoppoBridgeShim {
         }
         try {
             val js = bridge.context.assets.open(ASSET).bufferedReader().use { it.readText() }
-            WebViewCompat.addDocumentStartJavaScript(bridge.webView, js, setOf(policy.appOriginString))
+            WebViewCompat.addDocumentStartJavaScript(bridge.webView, js, setOf(policy.appOriginString, policy.localOriginString))   // hosted pages AND the bundled pages
             return true
         } catch (e: Exception) {
             Logger.error("Goppo: could not inject the native bridge script", e)

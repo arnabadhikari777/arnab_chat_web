@@ -73,36 +73,79 @@
   }
   P.on("app:ready", () => { setTimeout(askForNotificationsOnce, 2500); });
 
-  /* ---- Settings page: sound / lock-screen controls that only exist in the Android app ---- */
-  async function initAndroidSettings() {
-    const root = document.getElementById("android-settings");
-    if (!root || !P.notifications.available()) return;
-    root.hidden = false;
+  /* ---- Settings page: sound / lock-screen controls that only exist in the Android app ----
+   * Audit fixes (Task 2): (1) the click handler is bound as soon as the page is ready - it no longer waits for the native
+   * "app:ready" event or for the (up to 3 s) status call, which made the buttons look dead; (2) bound once (no duplicate
+   * handlers); (3) every button shows an immediate busy state and a real result; (4) permission state is re-read when the
+   * app comes back from Android Settings; (5) no false "success": the message comes from the state Android reports. */
+  const SECTION_ID = "android-settings";
+  function toast(key, fb, kind) { if (window.app && window.app.toast) window.app.toast(T(key, fb), kind); }
+
+  async function refreshAndroidStatus(root) {
     const st = await P.notifications.status();
     const note = root.querySelector("[data-android-status]");
-    if (st && note) {
-      const bits = [];
-      if (!st.enabled) bits.push(T("android.status_off", "Notifications are off for Goppo."));
-      if (st.fullScreenIntent === "denied") bits.push(T("android.status_fullscreen", "Calls will appear as a pop-up only; allow full-screen calls to see them over the lock screen."));
-      note.textContent = bits.join(" ");
-      note.classList.toggle("hidden", bits.length === 0);
-      const fs = root.querySelector('[data-android-open="fullScreenIntent"]');
-      if (fs) fs.classList.toggle("hidden", st.fullScreenIntent !== "denied");
-    }
-    root.addEventListener("click", async (e) => {
-      const b = e.target.closest("[data-android-open]");
-      if (!b) return;
-      const which = b.dataset.androidOpen;
-      if (which === "allow") {
-        const res = await P.notifications.request();
-        if (res && res.permanentlyDenied) await P.notifications.openSettings({});
-      } else if (which === "fullScreenIntent") await P.notifications.openSettings({ target: "fullScreenIntent" });
-      else if (which === "all") await P.notifications.openSettings({});
-      else await P.notifications.openSettings({ channel: which });
-    });
+    const fs = root.querySelector('[data-android-open="fullScreenIntent"]');
+    if (!st) { if (note) { note.textContent = T("android.status_unknown", "Could not read the notification state."); note.classList.remove("hidden"); } return null; }
+    const bits = [];
+    if (st.permission === "denied") bits.push(T("android.status_denied", "Notification permission is not granted."));
+    else if (!st.enabled) bits.push(T("android.status_off", "Notifications are off for Goppo."));
+    if (st.fullScreenIntent === "denied") bits.push(T("android.status_fullscreen", "Calls will appear as a pop-up only; allow full-screen calls to see them over the lock screen."));
+    if (note) { note.textContent = bits.join(" "); note.classList.toggle("hidden", bits.length === 0); }
+    if (fs) fs.classList.toggle("hidden", st.fullScreenIntent !== "denied");
+    return st;
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => P.on("app:ready", initAndroidSettings));
-  else P.on("app:ready", initAndroidSettings);
+
+  async function handleAllow() {
+    let st = await P.notifications.status();
+    if (st && st.permission === "denied") {
+      const res = await P.notifications.request();                 // the Android dialog; the user decides
+      st = res || (await P.notifications.status());
+      if (st && st.permission === "denied") {
+        // dialog suppressed / permanently denied: the only way is the app's Android settings page
+        const ok = await P.notifications.openSettings({});
+        toast(ok ? "android.opening_settings" : "android.settings_unavailable", ok ? "Opening Android settings..." : "Android settings could not be opened.", ok ? undefined : "error");
+        return;
+      }
+    } else if (st && !st.enabled) {
+      const ok = await P.notifications.openSettings({});             // permission fine, but switched off in Settings
+      toast(ok ? "android.opening_settings" : "android.settings_unavailable", ok ? "Opening Android settings..." : "Android settings could not be opened.", ok ? undefined : "error");
+      return;
+    }
+    st = await P.notifications.status();
+    if (st && st.permission !== "denied" && st.enabled) toast("android.perm_granted", "Notifications are allowed.");
+    else if (st) toast("android.perm_denied", "Notifications are still not allowed.", "error");
+  }
+
+  async function onAndroidClick(root, e) {
+    const b = e.target.closest("[data-android-open]");
+    if (!b || b.disabled) return;
+    const which = b.dataset.androidOpen;
+    b.disabled = true; b.setAttribute("aria-busy", "true");
+    try {
+      if (which === "allow") await handleAllow();
+      else {
+        const opts = which === "fullScreenIntent" ? { target: "fullScreenIntent" } : which === "all" ? {} : { channel: which };
+        const ok = await P.notifications.openSettings(opts);
+        if (!ok) toast("android.settings_unavailable", "Android settings could not be opened.", "error");
+      }
+    } finally {
+      b.disabled = false; b.removeAttribute("aria-busy");
+      refreshAndroidStatus(root);
+    }
+  }
+
+  function initAndroidSettings() {
+    const root = document.getElementById(SECTION_ID);
+    if (!root || root.dataset.bound === "1") return;
+    if (!P.notifications.available() && !P.native.available()) return;
+    root.dataset.bound = "1";
+    root.hidden = false;
+    root.addEventListener("click", (e) => { onAndroidClick(root, e); });          // bound immediately, once
+    refreshAndroidStatus(root);
+    window.addEventListener("goppo:app-resume", () => refreshAndroidStatus(root)); // back from Android Settings
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initAndroidSettings); else initAndroidSettings();
+  P.on("app:ready", initAndroidSettings);                                           // late bridge: bind then (guarded, once)
 
   window.GoppoDevices = { sync, unregister, installId };
 })();

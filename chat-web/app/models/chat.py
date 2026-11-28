@@ -57,6 +57,10 @@ class Message(db.Model):
     deleted_for_all = db.Column(db.Boolean, nullable=False, default=False)
     deleted_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    # Task 2 (local-first Android app): a revision number from the global counter `sync_counter`, raised every time
+    # this row is created or changes (new, delivered, seen, deleted for everyone / for someone). The app asks
+    # "what changed after revision N?" and gets exactly those rows. 0 = never assigned (cannot happen after the migration).
+    sync_rev = db.Column(db.BigInteger, nullable=False, default=0, server_default="0", index=True)
 
     __table_args__ = (
         db.UniqueConstraint("sender_id", "client_uuid", name="uq_message_client_uuid"),
@@ -69,6 +73,16 @@ class Message(db.Model):
     )
 
     attachments = db.relationship("MessageAttachment", backref="message", cascade="all, delete-orphan")
+
+
+class SyncCounter(db.Model):
+    """One row (id = 1): the last revision handed out. Raised inside the same transaction as the change it numbers,
+    so the row lock makes revisions commit in order and a reader that has seen revision N can never miss an older one."""
+
+    __tablename__ = "sync_counter"
+
+    id = db.Column(db.Integer, primary_key=True)
+    value = db.Column(db.BigInteger, nullable=False, default=0, server_default="0")
 
 
 class MessageAttachment(db.Model):

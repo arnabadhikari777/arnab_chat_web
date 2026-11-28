@@ -1,4 +1,4 @@
-from .chat import Conversation, Message, MessageAttachment, MessageDeletion
+from .chat import Conversation, Message, MessageAttachment, MessageDeletion, SyncCounter
 from .social import MessageRequest, Notification
 from .system import (
     Announcement,
@@ -20,6 +20,7 @@ __all__ = [
     "Message",
     "MessageAttachment",
     "MessageDeletion",
+    "SyncCounter",
     "MessageRequest",
     "Notification",
     "OtpVerification",

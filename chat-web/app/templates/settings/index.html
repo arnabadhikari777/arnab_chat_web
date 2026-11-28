@@ -14,6 +14,13 @@
     <a class="btn btn--secondary btn--block" href="{{ url_for('settings.password') }}"><svg class="icon"><use href="#i-lock"/></svg>{{ t('settings.password') }}</a>
   </section>
 
+  {% if bundle|default(false) %}
+  <section class="stack">
+    <h3>{{ t('settings.privacy') }} / {{ t('settings.notifications') }}</h3>
+    <a class="btn btn--secondary btn--block" href="{{ url_for('settings.index') }}?hosted=1" data-needs-online>{{ t('settings.more_online') }}</a>
+    <p class="field__hint">{{ t('settings.more_online_hint') }}</p>
+  </section>
+  {% else %}
   <section>
     <form method="post" action="{{ url_for('settings.privacy') }}" class="stack">
       {{ csrf() }}
@@ -47,6 +54,8 @@
     </form>
   </section>
 
+  {% endif %}
+
   <section class="stack" id="android-settings" hidden>
     <h3>{{ t('android.title') }}</h3>
     <p class="muted">{{ t('android.hint') }}</p>
@@ -57,6 +66,22 @@
     <button type="button" class="btn btn--secondary btn--block hidden" data-android-open="fullScreenIntent">{{ t('android.fullscreen') }}</button>
   </section>
 
+  {% if bundle|default(false) %}
+  <section class="stack" id="media-settings" hidden>
+    <h3>{{ t('media.title') }}</h3>
+    <p class="muted">{{ t('media.hint') }}</p>
+    <label class="choice"><input type="checkbox" id="media-auto">
+      <span class="choice__body"><strong>{{ t('media.auto') }}</strong><span class="field__hint">{{ t('media.auto_hint') }}</span></span></label>
+    <label class="choice"><input type="checkbox" id="media-photos">
+      <span class="choice__body"><strong>{{ t('media.photos') }}</strong><span class="field__hint">{{ t('media.photos_hint') }}</span></span></label>
+    <label class="choice"><input type="checkbox" id="media-videos">
+      <span class="choice__body"><strong>{{ t('media.videos') }}</strong><span class="field__hint">{{ t('media.videos_hint') }}</span></span></label>
+    <p class="field__hint">{{ t('media.history_note') }}</p>
+    <p class="muted"><strong>{{ t('media.usage') }}:</strong> <span id="media-usage">-</span></p>
+    <button type="button" class="btn btn--secondary btn--block" id="media-clear">{{ t('media.clear') }}</button>
+    <p class="field__hint">{{ t('media.clear_hint') }}</p>
+  </section>
+  {% else %}
   <section class="stack" id="push-settings" data-state="checking">
     <h3>{{ t('push.title') }}</h3>
     <p class="muted" data-push-status>{{ t('push.checking') }}</p>
@@ -66,12 +91,15 @@
     <button type="button" class="btn btn--secondary btn--block hidden" data-push-disable>{{ t('push.disable') }}</button>
   </section>
 
+  {% endif %}
+  {% if not bundle|default(false) %}
   <section class="stack">
     <h3>Install app</h3>
     <p class="muted">Install Goppo on your device for a faster, app-like experience.</p>
     <button type="button" class="btn btn--secondary btn--block hidden" data-pwa-install>Install app</button>
     <p class="field__hint">If the button is hidden, the app is already installed or this browser does not support installation prompts.</p>
   </section>
+  {% endif %}
 
   <section class="stack">
     <h3>{{ t('settings.language') }}</h3>
@@ -80,10 +108,14 @@
       <a href="{{ url_for('main.set_language', code='bn', next=url_for('settings.index')) }}" {% if lang == 'bn' %}aria-current="true"{% endif %}>{{ t('lang.bn') }}</a>
     </nav>
   </section>
+  {% if bundle|default(false) %}
+  <button class="btn btn--ghost btn--block" type="button" id="bundle-logout"><svg class="icon"><use href="#i-logout"/></svg>{{ t('nav.logout') }}</button>
+  {% else %}
   <form method="post" action="{{ url_for('auth.logout') }}">
     {{ csrf() }}
     <button class="btn btn--ghost btn--block" type="submit"><svg class="icon"><use href="#i-logout"/></svg>{{ t('nav.logout') }}</button>
   </form>
+  {% endif %}
 </main>
 {% with active='settings' %}{% include "partials/bottom_nav.html" %}{% endwith %}
 {% endblock %}

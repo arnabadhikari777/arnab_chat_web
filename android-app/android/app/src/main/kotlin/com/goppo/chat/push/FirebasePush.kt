@@ -84,7 +84,9 @@ class GoppoFirebaseService : FirebaseMessagingService() {
             is PushMessage.NewMessage -> {
                 MessageNotifier.show(ctx, m)
                 m.ack?.let { ackAsync(ctx, it) }
+                runCatching { com.goppo.chat.local.SyncScheduler.enqueueNow(ctx) }      // save the new message (and auto-download new media) in the background
             }
+            is PushMessage.SyncHint -> runCatching { com.goppo.chat.local.SyncScheduler.enqueueNow(ctx) }
             is PushMessage.Notice -> MessageNotifier.showNotice(ctx, m)
             is PushMessage.Invalid -> Logger.warn("Goppo: ignored an invalid push (${m.why})")
         }

@@ -4,6 +4,8 @@
 
     <!-- Core permissions. Nothing for SMS, contacts, phone numbers, storage or location. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Task 2: notice when the network returns so waiting messages are sent at once (normal permission, no prompt) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Normal (install-time, no prompt) permission: lets the WebView's WebRTC engine set the call audio mode. -->

@@ -35,6 +35,9 @@ sealed class PushMessage {
     data class Notice(val body: String, val path: String?, val notificationId: String?) : PushMessage()
 
     /** Unknown type or invalid payload: ignored (never shown). */
+    /** "Something changed, fetch the change feed" (e.g. a message was deleted for everyone). Carries no message content. */
+    data class SyncHint(val reason: String) : PushMessage()
+
     data class Invalid(val why: String) : PushMessage()
 }
 
@@ -87,6 +90,7 @@ object PushParser {
                 PushMessage.MissedCall(id.lowercase(), data["call_type"] == "video", text(data["caller_name"], 80).ifEmpty { "Goppo" },
                     text(data["body"], 200), SitePaths.safe(data["path"]))
             }
+            "sync" -> PushMessage.SyncHint(text(data["reason"], 24).filter { it.isLetterOrDigit() || it == '_' })
             "announcement" -> PushMessage.Notice(text(data["body"], 200), SitePaths.safe(data["path"]), num(data["notification_id"]))
             else -> PushMessage.Invalid("unknown type")
         }

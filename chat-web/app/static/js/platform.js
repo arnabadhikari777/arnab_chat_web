@@ -167,7 +167,8 @@
   const notifications = {
     available: () => info.native && !!plugin() && typeof plugin().getNotificationStatus === "function",
     async status() { const r = await nativeCall("getNotificationStatus"); return r.handled ? r.result : null; },
-    async request() { const r = await nativeCall("requestNotificationPermission", {}, 60000); return r.handled ? r.result : null; },
+    /** The Android permission dialog waits for the person; 30 s is plenty, then the caller re-reads the real state. */
+    async request() { const r = await nativeCall("requestNotificationPermission", {}, 30000); return r.handled ? r.result : null; },
     /** opts: {channel: "calls"|"messages"|"missed_calls"} or {target: "fullScreenIntent"}; none = the app's notification page. */
     async openSettings(opts) { const r = await nativeCall("openNotificationSettings", opts || {}); return r.handled; },
   };

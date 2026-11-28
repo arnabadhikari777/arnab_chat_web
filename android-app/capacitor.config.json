@@ -5,12 +5,12 @@
   "appendUserAgent": "GoppoAndroid/1.0.0",
   "backgroundColor": "#0b6e78",
   "server": {
-    "url": "https://arnabchatweb.pythonanywhere.com",
+    "androidScheme": "https",
+    "hostname": "localhost",
     "cleartext": false,
     "allowNavigation": [
       "arnabchatweb.pythonanywhere.com"
-    ],
-    "errorPath": "offline.html"
+    ]
   },
   "android": {
     "allowMixedContent": false,

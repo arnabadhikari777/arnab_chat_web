@@ -81,8 +81,25 @@ jobs:
           print("google-services.json OK for com.goppo.chat")
           PY
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: chat-web/requirements.txt
+
       - name: Install pinned Node dependencies
         run: npm ci --no-audit --no-fund
+
+      # Task 2: the APK contains the website's own frontend. Build it from the real templates/CSS/JS before every sync, so a
+      # frontend change is in the next APK automatically. GOPPO_BACKEND_URL is a public address (not a secret); default = production.
+      - name: Build the bundled frontend from the website sources
+        working-directory: .
+        env:
+          GOPPO_BACKEND_URL: ${{ vars.GOPPO_BACKEND_URL }}
+        run: |
+          pip install -r chat-web/requirements.txt
+          if [ -z "$GOPPO_BACKEND_URL" ]; then unset GOPPO_BACKEND_URL; fi
+          python chat-web/tools/build_android_web.py
 
       - name: Sync Capacitor and rebuild the bridge script
         run: |

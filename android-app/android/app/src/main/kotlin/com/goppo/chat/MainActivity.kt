@@ -54,6 +54,7 @@ class MainActivity : BridgeActivity() {
 
         current = WeakReference(this)
         registerPlugin(GoppoNativePlugin::class.java)      // before super.onCreate, as Capacitor requires
+        registerPlugin(com.goppo.chat.local.GoppoLocalPlugin::class.java)   // local database / sync / media (bundled UI)
         mediaPermissions = MediaPermissionRequester(this)  // registers its launcher before the activity is STARTED
         super.onCreate(savedInstanceState)
 
@@ -63,7 +64,7 @@ class MainActivity : BridgeActivity() {
         configureWindow(b.webView)
         hardenWebView(b.webView)
 
-        val policy = GoppoRuntime.configure(b.serverUrl)
+        val policy = GoppoRuntime.ensureConfigured(this)
         NotificationChannels.ensure(this)                  // creates missing channels only; never touches the user's choices
         NativeCallManager.init(this)
         val startUrl = openUrlFrom(intent) ?: b.appUrl
@@ -215,9 +216,11 @@ class MainActivity : BridgeActivity() {
     /** The page a notification asks for, as a full URL on the website origin, or null. Only validated site-relative paths are used. */
     private fun openUrlFrom(intent: android.content.Intent?): String? {
         val path = SitePaths.safe(intent?.getStringExtra(EXTRA_OPEN_PATH)) ?: return null
-        val origin = GoppoRuntime.policy?.appOriginString ?: return null
-        val url = origin + path
-        return if (GoppoRuntime.policy?.isAppOrigin(url) == true) url else null
+        val policy = GoppoRuntime.policy ?: return null
+        // A path that has a bundled twin ("/chat/12" -> chat.html?c=12) opens the LOCAL page: it works from the local database.
+        LocalRoutes.toLocal(path)?.let { return policy.localOriginString + "/" + it }
+        val url = policy.appOriginString + path
+        return if (policy.isAppOrigin(url)) url else null
     }
 
     override fun onResume() {

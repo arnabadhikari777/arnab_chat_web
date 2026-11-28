@@ -368,3 +368,26 @@ def deliver_call_event(rec: CallHistory, reason: str) -> int:
         db.session.rollback()
         log.exception("FCM call event failed (call %s)", getattr(rec, "id", None))
         return 0
+
+
+def deliver_sync_hint(user_id: int, reason: str, conversation_id: int | None = None) -> int:
+    """Data-only wake-up for the person's Android app: "something changed, fetch the change feed" (e.g. a message was
+    deleted for everyone). Carries NO message text and no message id. If no phone gets it, nothing is lost: the app
+    also syncs when it opens, when the network returns and on its periodic background sync."""
+    try:
+        if not _available():
+            return 0
+        from . import device_service
+
+        devices = device_service.active_devices(user_id)
+        if not devices:
+            return 0
+        data = {"type": "sync", "reason": str(reason)[:24], "sent_at": _s(int(time.time() * 1000))}
+        if conversation_id is not None:
+            data["conversation_id"] = _s(conversation_id)
+        ttl = int(current_app.config.get("PUSH_TTL_SECONDS", 86400))
+        return _deliver(devices, data, ttl=ttl, collapse="sync", priority="HIGH")
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        log.exception("FCM sync hint failed (user %s)", user_id)
+        return 0

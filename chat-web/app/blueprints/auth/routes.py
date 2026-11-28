@@ -1,4 +1,4 @@
-from flask import current_app, flash, redirect, render_template, request, session, url_for, abort
+from flask import current_app, flash, jsonify, redirect, render_template, request, session, url_for, abort
 import time
 import hmac
 import hashlib
@@ -188,6 +188,69 @@ def login():
             else:
                 return _start_session(user, next_url)
     return render_template("auth/login.html", error=error, identifier=identifier, next_url=next_url or "")
+
+
+# ---------------------------------------------------------------- JSON endpoints for the Android app (bundled UI)
+def _json_login_key() -> str:
+    ident = str((request.get_json(silent=True) or {}).get("identifier") or "").strip().lower()
+    return "login:" + hashlib.sha256(ident.encode()).hexdigest()[:24]       # same bucket as the web form
+
+
+def _me(user) -> dict:
+    return {"id": user.id, "username": user.username, "full_name": user.full_name,
+            "avatar": getattr(user, "avatar_url", None), "language": user.language}
+
+
+@bp.get("/api/auth/csrf")
+def api_csrf():
+    """A CSRF token for the current session (the native app has no page to read it from). Same token the pages use."""
+    from flask_wtf.csrf import generate_csrf
+    res = jsonify({"ok": True, "token": generate_csrf()})
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@bp.get("/api/auth/me")
+def api_me():
+    """Who is signed in? 401 JSON when nobody is."""
+    if not current_user.is_authenticated:
+        return jsonify({"ok": False, "error": {"code": 401, "message": "Not signed in."}}), 401
+    res = jsonify({"ok": True, "user": _me(current_user)})
+    res.headers["Cache-Control"] = "no-store"
+    return res
+
+
+@bp.post("/api/auth/login")
+@limiter.limit("10 per minute;60 per hour")
+@limiter.limit(lambda: current_app.config["LOGIN_ACCOUNT_LIMIT"], key_func=_json_login_key)
+def api_login():
+    """Same rules as the /login form (same service, same limits, same admin switches), answered as JSON. CSRF is NOT
+    exempt: the app sends the token from /api/auth/csrf. A new session starts at every login (session fixation)."""
+    from ...i18n import t
+    data = request.get_json(silent=True) or {}
+    identifier, password = str(data.get("identifier") or "")[:254], str(data.get("password") or "")[:1024]
+
+    def fail(key, values=None, status=400, **extra):
+        return jsonify({"ok": False, "error": {"code": key, "message": t(key, **(values or {}))}, **extra}), status
+
+    try:
+        user = auth_service.log_in(identifier, password)
+    except NeedsVerification as exc:
+        _set_pending(exc.email, "register")
+        try:
+            auth_service.send_code(exc.email, "register", get_language())
+        except (OtpError, EmailDeliveryError):
+            pass
+        return fail("auth.verify_first", status=403, needs_verification=True, next="/verify-email")
+    except ServiceError as exc:
+        return fail(exc.key, exc.values, 401)
+    key = _login_blocked_key(user)
+    if key:
+        return fail(key, status=403)
+    _rotate_session()
+    session.permanent = True
+    login_user(user)
+    return jsonify({"ok": True, "user": _me(user)})
 
 
 @bp.post("/logout")

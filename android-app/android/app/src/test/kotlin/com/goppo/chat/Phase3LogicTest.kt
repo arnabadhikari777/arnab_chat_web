@@ -28,6 +28,11 @@ class PushParserTest {
         "expires_at" to (NOW + 55_000).toString(), "sent_at" to NOW.toString(), "notification_id" to "99",
     ) + extra
 
+    @Test fun syncHintIsParsedAndCarriesNoContent() {
+        val m = PushParser.parse(mapOf("type" to "sync", "reason" to "deleted!!", "conversation_id" to "5"), NOW) as PushMessage.SyncHint
+        assertEquals("deleted", m.reason)
+    }
+
     @Test fun incomingCallIsParsedAndCleaned() {
         val m = PushParser.parse(call(), NOW) as PushMessage.IncomingCall
         assertEquals(CALL, m.callId); assertTrue(m.video); assertEquals("Alice", m.callerName); assertEquals("7", m.callerId)

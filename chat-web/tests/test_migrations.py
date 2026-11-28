@@ -18,7 +18,7 @@ from app.models import User
 
 ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS = str(ROOT / "migrations")
-HEAD = "d4f6a8c0e2b3"
+HEAD = "e8a1c4b7d2f9"
 
 
 def script_directory():
