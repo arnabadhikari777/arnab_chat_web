@@ -9,7 +9,11 @@
 <main class="page page--flush">
   <div class="page__inner">{{ flashes() }}</div>
   {% if items %}
-    <div class="list" id="notice-list" data-mark-url="{{ url_for('chat.notices_mark_displayed') }}">
+    <div class="page__inner">
+      <button type="button" class="btn btn--secondary" id="notice-clear">{{ t('notice.clear_all') }}</button>
+    </div>
+    <div class="list" id="notice-list" data-mark-url="{{ url_for('chat.notices_mark_displayed') }}"
+         data-read-all-url="{{ url_for('chat.notices_read_all') }}" data-clear-url="{{ url_for('chat.notices_clear_all') }}">
       {% for it in items %}
         <a class="list-item notice {% if not it.note.is_read %}notice--unread{% endif %}"
            href="{{ url_for('notices.go', notification_id=it.note.id) }}"

@@ -32,17 +32,18 @@ def _rules(ep: str, method: str) -> list[tuple[str, str]]:
         out.append(("requests_enabled", "site.requests_closed"))
     if ep == "notices.announcement":
         out.append(("announcements_enabled", "site.announcements_closed"))
-    if ep == "auth.register":
-        out.append(("registration_enabled", "site.registration_closed"))
-    if ep in ("auth.login", "auth.sso_login"):
-        out.append(("login_enabled", "site.login_closed"))
+    # auth.register is NOT gated here: the route itself shows the "sign-ups are closed" notice on the sign-in page.
+    # Sign-in is NOT gated here: the visitor is anonymous at this point, so an admin could not tell apart from a
+    # normal user. auth.login, auth.api_login and auth.sso_login decide per account (admins always get in).
     return out
 
 
 def _blocked(key: str, custom: str = "", retry: bool = False):
     message = custom or t(key)
+    # Maintenance has a stable machine code so apps can recognise it and retry later; other switches use their message key.
+    code = "maintenance" if retry else key
     if wants_json():
-        res = jsonify({"ok": False, "error": {"code": key, "message": message}})
+        res = jsonify({"ok": False, "error": {"code": code, "message": message}})
     else:
         res = make_response(render_template(
             "errors/unavailable.html",

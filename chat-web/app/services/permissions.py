@@ -27,6 +27,10 @@ ENDPOINT_PERMS = {
     "admin.audit": "audit.view", "admin.security": "audit.view",
     "admin.user_push_revoke": "users.moderate",
     "admin.staff": "staff.manage",
+    # Database tools: a backup holds every account and message (and password hashes), so only super admins may use them.
+    "admin.database": "staff.manage", "admin.database_backup": "staff.manage",
+    "admin.database_download": "staff.manage", "admin.database_verify": "staff.manage",
+    "admin.database_delete": "staff.manage", "admin.database_cleanup": "staff.manage",
 }
 
 

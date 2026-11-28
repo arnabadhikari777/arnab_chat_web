@@ -49,6 +49,9 @@ TEXTS = {
     "site_name": 40,
     "public_contact": 120,
 }
+# Texts shown on one line (page titles, headers, contact line): line breaks and control characters are refused.
+# maintenance_message and site_announcement are multi-line text areas, so they may contain line breaks.
+SINGLE_LINE = {"site_name", "public_contact"}
 _CACHE_KEY = "goppo.site_settings"
 
 
@@ -127,6 +130,9 @@ def update(admin, form) -> dict:
         new = (form.get(key) or "").strip()
         if len(new) > limit:
             errors[key] = ("err.setting_too_long", {"max": limit})
+            continue
+        if key in SINGLE_LINE and any(ord(ch) < 32 or ch in "\u2028\u2029" for ch in new):
+            errors[key] = ("err.setting_single_line", {})
             continue
         if new != stored.get(key, ""):
             changes[key] = {"from": "text", "to": "text"}

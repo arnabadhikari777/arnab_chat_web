@@ -110,6 +110,7 @@ def test_presence_timeout_is_never_shorter_than_the_write_interval(app):
 def test_presence_is_written_at_most_once_per_interval(app):
     user = verified("sam")
     user.last_seen_at = utcnow() - timedelta(seconds=5)
+    db.session.commit()                       # without this, refresh() below would reload the old (empty) database value
     stamp = user.last_seen_at
     presence_service.touch(user)
     db.session.refresh(user)

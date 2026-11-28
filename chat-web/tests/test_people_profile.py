@@ -412,7 +412,7 @@ def test_post_actions_need_login(client, world):
 
 
 def test_dashboard_has_edit_link_and_nav(app, world):
-    html = as_(app, world["alice"]).get("/").data.decode()
+    html = as_(app, world["alice"]).get("/profile").data.decode()    # "/" now redirects to Messages
     assert "/settings/profile" in html and "/people" in html and "Hello from Alice" in html
 
 

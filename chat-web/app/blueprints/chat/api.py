@@ -3,6 +3,7 @@ from datetime import datetime
 
 from flask import abort, current_app, g, jsonify, request, session
 from flask_login import current_user
+from werkzeug.exceptions import HTTPException
 
 from ...extensions import csrf, db, limiter
 from ...i18n import t
@@ -139,6 +140,8 @@ def send(conversation_id):
         return _error(exc, 400)
     except ServiceError as exc:
         return _error(exc, 400)
+    except HTTPException:
+        raise   # e.g. 413 "request too large": the central handler answers with the right status, not a fake 500
     except Exception:  # noqa: BLE001 - the message could NOT be saved: clean JSON, and a retry with the same uuid is safe
         db.session.rollback()
         current_app.logger.exception("sending a message failed (conversation %s)", conversation_id)
@@ -330,3 +333,21 @@ def notices_mark_displayed():
             continue
     n = notification_service.mark_displayed(current_user.id, clean)
     return jsonify({"ok": True, "marked": n, "notices": notification_service.unread_count(current_user.id)})
+
+
+@bp.post("/api/notices/read-all")
+@auth_required
+@limiter.limit("60 per minute")
+def notices_read_all():
+    """Mark every unread notice of the signed-in user as read (the target user is never taken from the request)."""
+    n = notification_service.mark_all_read(current_user.id)
+    return jsonify({"ok": True, "marked": n, "notices": notification_service.unread_count(current_user.id)})
+
+
+@bp.post("/api/notices/clear-all")
+@auth_required
+@limiter.limit("20 per minute")
+def notices_clear_all():
+    """Permanently delete the signed-in user's own notices. Nothing in the request can select another user."""
+    n = notification_service.clear_all(current_user.id)
+    return jsonify({"ok": True, "deleted": n, "notices": notification_service.unread_count(current_user.id)})

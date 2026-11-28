@@ -147,7 +147,7 @@ def test_ack_never_moves_a_seen_message_backwards(app, duo, configured, sent):
 
 
 def test_ack_works_without_cookies_and_needs_no_csrf(app, duo, configured, sent):
-    app.config["WTF_CSRF_ENABLED"] = True
-    subscribe(duo)
+    subscribe(duo)                                    # signed-in endpoints need CSRF, so set up before switching it on
     say(duo.a, duo, "hi", "uuid-0001-aaaa")
+    app.config["WTF_CSRF_ENABLED"] = True              # from here on only the cookie-less service-worker call is made
     assert ack(app, {"token": token(sent)}).status_code == 200

@@ -8,7 +8,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from ..extensions import db
 from ..models import User
 from ..utils.time import utcnow
-from . import cloudinary_service, otp_service
+from . import cloudinary_service, otp_service, security_service
 from .email_service import send_otp_email
 from .notification_service import add_notification
 from .errors import (
@@ -160,13 +160,17 @@ def log_in(identifier: str, password: str) -> User:
 
     if user is None:
         check_password_hash(_DUMMY_HASH, password or "")
+        security_service.record("login_failed", None, identifier)
         raise ServiceError("auth.invalid_credentials")
     if not user.check_password(password or ""):
         current_app.logger.info("Failed login for %s", user.username)
+        security_service.record("login_failed", user.id, identifier)
         raise ServiceError("auth.invalid_credentials")
     if not user.is_email_verified:
         raise NeedsVerification(user.email)
     if user.lift_expired_suspension():
+        from .admin_service import audit_suspension_ended
+        audit_suspension_ended(user.id)
         db.session.commit()
     if user.status == "suspended":
         raise ServiceError("auth.suspended")

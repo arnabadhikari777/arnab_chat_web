@@ -128,9 +128,14 @@ object SyncEngine {
 
     private fun flushOutbox(context: Context, store: LocalStore, changed: MutableSet<Long>): Outcome {
         var outcome = Outcome.DONE
+        // Messages of one chat must reach the server in the order they were written. When a send fails for a temporary
+        // reason, the later messages of THAT chat wait for the next pass (other chats keep going).
+        val blockedChats = HashSet<Long>()
         for (item in store.outboxDue(System.currentTimeMillis())) {
             val m = store.message(item.uuid)
             if (m == null) { store.outboxDone(item.id); continue }
+            val isSend = item.kind == "send_text" || item.kind == "send_media"
+            if (isSend && m.conversationId in blockedChats) continue
             val r: ApiClient.Result = when (item.kind) {
                 "send_text" -> { if (m.serverId != null) { store.outboxDone(item.id); continue }
                     store.setPendingStatus(m.uuid, Status.SENDING); changed.add(m.conversationId)
@@ -155,7 +160,7 @@ object SyncEngine {
                 r.ok -> {
                     val applied = if (item.kind == "delete_everyone") { store.applyLocalTombstone(m.uuid); true }
                         else runCatching { store.applyServerMessage(parse(JSONObject(r.body).getJSONObject("message")), System.currentTimeMillis()) }.isSuccess
-                    if (applied) store.outboxDone(item.id) else { store.setPendingStatus(m.uuid, Status.WAITING); outcome = Outcome.RETRY }
+                    if (applied) store.outboxDone(item.id) else { if (isSend) blockedChats.add(m.conversationId); store.setPendingStatus(m.uuid, Status.WAITING); outcome = Outcome.RETRY }
                 }
                 r.code == 401 || (r.code == 403 && item.kind != "delete_everyone") -> { store.setPendingStatus(m.uuid, Status.WAITING); return Outcome.SIGNED_OUT }
                 item.kind == "delete_everyone" && (r.code == 404 || r.code == 403) -> { if (r.code == 404) store.applyLocalTombstone(m.uuid) else { store.clearDeletePending(m.uuid); store.outboxDone(item.id) } }
@@ -163,6 +168,7 @@ object SyncEngine {
                     if (item.kind == "delete_everyone") { store.clearDeletePending(m.uuid); store.outboxDone(item.id) } else store.markFailed(m.uuid, "http ${r.code}")
                 }
                 else -> {                                  // offline / timeout / server error: stays Waiting, retried with back-off
+                    if (isSend) blockedChats.add(m.conversationId)
                     store.setPendingStatus(m.uuid, Status.WAITING)
                     store.outboxRetryLater(item.id, System.currentTimeMillis(), item.attempts + 1, "http ${r.code}")
                     outcome = Outcome.RETRY

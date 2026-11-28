@@ -24,14 +24,24 @@ def audit(admin: User, action: str, target_type: str | None = None, target_id: i
                                  target_id=target_id, details=details or {}))
 
 
+def audit_suspension_ended(user_id: int) -> None:
+    """Log that a timed suspension ran out by itself (no admin acted, so admin_id stays empty). Caller commits."""
+    db.session.add(AdminAuditLog(admin_id=None, action="user.status_expired", target_type="user",
+                                 target_id=user_id, details={"from": "suspended", "to": "active"}))
+
+
 # ------------------------------------------------------------------ statistics
 def expire_suspensions() -> int:
     """Turn finished timed suspensions back into active accounts (so lists and counts are right)."""
-    n = (User.query.filter(User.status == "suspended", User.suspended_until.isnot(None),
-                           User.suspended_until <= utcnow())
+    ids = [row[0] for row in db.session.query(User.id).filter(
+        User.status == "suspended", User.suspended_until.isnot(None), User.suspended_until <= utcnow()).all()]
+    if not ids:
+        return 0
+    n = (User.query.filter(User.id.in_(ids), User.status == "suspended")
          .update({"status": "active", "suspended_until": None}, synchronize_session=False))
-    if n:
-        db.session.commit()
+    for uid in ids:
+        audit_suspension_ended(uid)
+    db.session.commit()
     return n
 
 
@@ -162,6 +172,10 @@ def create_announcement(admin: User, form) -> Announcement:
     title_bn = (form.get("title_bn") or "").strip() or None
     body_bn = (form.get("body_bn") or "").strip() or None
     errors = {}
+    from . import site_settings
+    if not site_settings.enabled("announcements_enabled"):
+        # Announcements are switched off site-wide: readers could not open them, so do not send notices that lead nowhere.
+        raise FieldErrors({"title": ("err.announcements_off", {})})
     if not 3 <= len(title) <= 150:
         errors["title"] = ("err.ann_title", {})
     if not 3 <= len(body) <= 3000:

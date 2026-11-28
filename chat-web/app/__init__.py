@@ -93,6 +93,8 @@ def create_app(config_name: str | None = None) -> Flask:
     @app.before_request
     def _lift_expired_suspension():
         if current_user.is_authenticated and current_user.lift_expired_suspension():
+            from .services.admin_service import audit_suspension_ended
+            audit_suspension_ended(current_user.id)
             db.session.commit()
 
     @app.context_processor

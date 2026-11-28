@@ -3,7 +3,7 @@ from flask import current_app, url_for
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Announcement, Notification
+from ..models import Announcement, Notification, PushDelivery
 from ..i18n import t
 from ..utils.time import utcnow
 
@@ -121,5 +121,20 @@ def mark_displayed(user_id: int, notification_ids: list[int]) -> int:
             Notification.is_read.is_(False),
         ).update({"is_read": True}, synchronize_session=False)
     )
+    db.session.commit()
+    return n
+
+
+def clear_all(user_id: int) -> int:
+    """Permanently delete every notice that belongs to this user, and the push records of those notices.
+
+    Only rows owned by `user_id` are touched. Push subscriptions (registered devices) are kept.
+    """
+    ids = [row[0] for row in db.session.query(Notification.id).filter(Notification.user_id == user_id).all()]
+    if not ids:
+        return 0
+    # Delete the dependants explicitly: SQLite only honours ON DELETE CASCADE when foreign keys are enabled.
+    PushDelivery.query.filter(PushDelivery.notification_id.in_(ids)).delete(synchronize_session=False)
+    n = Notification.query.filter(Notification.user_id == user_id).delete(synchronize_session=False)
     db.session.commit()
     return n

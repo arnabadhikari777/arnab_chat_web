@@ -71,7 +71,7 @@ def test_a_missing_contact_alone_means_not_configured(app, duo):
 
 def test_configured_returns_public_key_and_never_the_private_key(app, duo, configured):
     res = duo.a.get("/api/push/config")
-    assert res.get_json() == {"ok": True, "configured": True, "publicKey": PUBLIC}
+    assert res.get_json() == {"ok": True, "configured": True, "publicKey": PUBLIC, "enabled": True}   # "enabled" = admin switch, read by push.js
     assert PRIVATE not in res.get_data(as_text=True)
     assert res.headers["Cache-Control"] == "no-store"
 

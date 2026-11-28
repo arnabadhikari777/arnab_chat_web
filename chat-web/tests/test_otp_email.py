@@ -55,6 +55,9 @@ def smtp(app, monkeypatch):
     FakeSMTP.instances = []
     app.config.update(MAIL_PROVIDER="smtp", MAIL_SERVER="smtp.gmail.com", MAIL_PORT=587,
                       MAIL_USERNAME="me@gmail.com", MAIL_PASSWORD="abcd efgh ijkl mnop", MAIL_FROM_ADDRESS="")
+    # The autouse fixture replaced send_email with a recorder, and send_otp_email looks it up by name at call time.
+    # Put the real one back so these tests really exercise the SMTP path (only the socket is faked).
+    monkeypatch.setattr(email_service, "send_email", REAL_SEND_EMAIL)
     monkeypatch.setattr(email_service.smtplib, "SMTP", FakeSMTP)
     monkeypatch.setattr(email_service.smtplib, "SMTP_SSL", FakeSMTP)
     return FakeSMTP

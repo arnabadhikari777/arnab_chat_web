@@ -99,7 +99,10 @@ def test_messaging_off_blocks_new_messages_but_old_ones_stay_readable(app, world
 def test_chat_off_is_a_separate_full_shutdown(app, world):
     save_settings(world.admin, chat_enabled=False)
     assert world.b.get(f"/api/conversations/{world.conv}/messages").status_code == 503
-    assert world.admin.get(f"/api/conversations/{world.conv}/messages").status_code == 200   # admins are never locked out
+    # Admins are never locked out by the switch (not 503). They are not members of this private chat, so reading its
+    # messages is 404 by design: admins must never read other people's chats.
+    assert world.admin.get(f"/api/conversations/{world.conv}/messages").status_code == 404
+    assert world.admin.get("/api/chats").status_code == 200
     assert site_settings.enabled("messaging_enabled")                                         # the other switch is untouched
 
 

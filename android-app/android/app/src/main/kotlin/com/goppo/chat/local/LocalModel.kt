@@ -69,7 +69,7 @@ object Merge {
             else -> Status.forward(existing.status, s.status)
         }
         val row = LocalMessage(
-            localId = existing?.localId ?: 0L, serverId = s.id, uuid = s.uuid, conversationId = s.conversationId,
+            localId = existing?.localId ?: 0L, serverId = s.id, uuid = existing?.uuid ?: s.uuid, conversationId = s.conversationId,
             senderId = s.senderId, mine = s.mine, type = s.type,
             body = if (deleted || s.hidden) "" else s.body,
             status = status, localCreatedAt = existing?.localCreatedAt ?: nowLocal, serverAt = s.createdAt,

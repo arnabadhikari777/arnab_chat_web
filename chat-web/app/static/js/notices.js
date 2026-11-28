@@ -24,6 +24,33 @@
       }
     }).catch(function () {});
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-  else init();
+  function wireClear() {
+    var btn = document.getElementById("notice-clear");
+    var list = document.getElementById("notice-list");
+    if (!btn || !list || !window.app) return;
+    btn.addEventListener("click", function () {
+      window.app.confirmDialog({
+        title: window.app.t("notice.clear_all"),
+        text: window.app.t("notice.clear_confirm"),
+        confirmLabel: window.app.t("notice.clear_all"),
+        danger: true,
+      }).then(function (yes) {
+        if (!yes) return null;
+        btn.disabled = true;
+        return window.app.api(list.dataset.clearUrl, { method: "POST", json: {} }).then(function (res) {
+          if (!res.ok) {
+            btn.disabled = false;
+            window.app.toast((res.error && res.error.message) || window.app.t("toast.something_wrong"), "error");
+            return;
+          }
+          if (window.appBadge) window.appBadge.set("notices", 0);
+          window.app.toast(window.app.t("notice.cleared"));
+          window.location.reload();
+        });
+      });
+    });
+  }
+  function boot() { init(); wireClear(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();

@@ -49,11 +49,16 @@ class LocalStore private constructor(private val context: Context, val userId: L
      * Saves one server message (idempotent: the same message twice = one row). Matches by server id first, then by the
      * client uuid (that is how my own waiting message is confirmed by the server). Everything happens in one transaction.
      */
-    fun applyServerMessage(s: ServerMessage, now: Long): Merge.Result {
+    fun applyServerMessage(serverMessage: ServerMessage, now: Long): Merge.Result {
         db.beginTransaction()
         try {
-            val existing = byUuid(s.uuid) ?: db.rawQuery("SELECT * FROM messages WHERE server_id = ?", arrayOf(s.id.toString()))
-                .use { if (it.moveToFirst()) readRow(it) else null }
+            val byServerId = { db.rawQuery("SELECT * FROM messages WHERE server_id = ?", arrayOf(serverMessage.id.toString()))
+                .use { if (it.moveToFirst()) readRow(it) else null } }
+            // The server only guarantees that a uuid is unique PER SENDER. So the uuid may only identify a message of mine
+            // (my own waiting message being confirmed); another person's message is always matched by its server id.
+            // Otherwise a peer who reuses my uuid could overwrite my waiting message and its outbox entry.
+            val existing = if (serverMessage.mine) (byUuid(serverMessage.uuid)?.takeIf { it.mine } ?: byServerId()) else byServerId()
+            val s = if (existing == null && byUuid(serverMessage.uuid) != null) serverMessage.copy(uuid = "${serverMessage.uuid}~${serverMessage.id}") else serverMessage
             val r = Merge.apply(existing, s, now)
             val cv = ContentValues().apply {
                 put("server_id", r.row.serverId); put("uuid", r.row.uuid); put("conv_id", r.row.conversationId)

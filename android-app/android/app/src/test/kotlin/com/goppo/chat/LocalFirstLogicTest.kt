@@ -27,6 +27,13 @@ class LocalFirstLogicTest {
         assertFalse(Status.isPending(Status.SENT)); assertFalse(Status.isPending(Status.FAILED))
     }
 
+    @Test fun theLocalRowKeepsItsOwnUuidWhenTheServerRecordCarriesAnother() {
+        // LocalStore stores a peer's message that reuses a uuid under a derived uuid; later merges must keep that key.
+        val existing = Merge.apply(null, srv(7).copy(uuid = "u~7"), 1L).row
+        val again = Merge.apply(existing, srv(7).copy(uuid = "u"), 2L)
+        assertEquals("u~7", again.row.uuid)
+    }
+
     // ---------------------------------------------------------------- merge
     @Test fun newServerMessageIsNewToThisPhone() {
         val r = Merge.apply(null, srv(5), 1L)

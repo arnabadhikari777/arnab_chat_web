@@ -9,7 +9,7 @@ from flask_login import current_user, login_user, logout_user
 from ...extensions import limiter
 from ...i18n import get_language
 from ...middleware.guards import safe_next
-from ...services import auth_service, otp_service, site_settings
+from ...services import auth_service, otp_service, security_service, site_settings
 from ...services.errors import (
     EmailDeliveryError,
     FieldErrors,
@@ -43,6 +43,7 @@ def _start_session(user, next_url: str | None = None):
     _rotate_session()
     session.permanent = True
     login_user(user)
+    security_service.record("login", user.id, "web")
     return redirect(safe_next(next_url, url_for("main.home")))
 
 
@@ -250,6 +251,7 @@ def api_login():
     _rotate_session()
     session.permanent = True
     login_user(user)
+    security_service.record("login", user.id, "app")
     return jsonify({"ok": True, "user": _me(user)})
 
 
@@ -385,5 +387,6 @@ def sso_login():
     _rotate_session()
     session.permanent = True
     login_user(user)
+    security_service.record("login", user.id, "sso")
     return redirect(url_for("main.home"))
 

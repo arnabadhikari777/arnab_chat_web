@@ -79,7 +79,6 @@ def test_otp_is_stored_hashed(client, fakes):
     ("password", "12345678", "at least 8"),
     ("confirm_password", "different1", "do not match"),
     ("account_type", None, "Public or Private"),
-    ("photo", None, "Choose a profile photo"),
 ])
 def test_registration_validation(client, fakes, field, value, key):
     res = register(client, **{field: value})
@@ -131,20 +130,30 @@ def test_photo_empty_file(client, fakes):
     assert b"empty" in res.data
 
 
-def test_cloudinary_failure_creates_no_user(client, fakes, monkeypatch):
+def test_profile_photo_is_optional(client, fakes):
+    """The sign-up photo is optional (auth_service.register_user): no photo still creates the account."""
+    res = register(client, photo=None)
+    assert res.status_code == 302 and User.query.count() == 1
+    assert User.query.one().avatar_url is None and fakes.uploads == []
+
+
+def test_cloudinary_failure_never_blocks_sign_up(client, fakes, monkeypatch):
+    """A failed picture upload must not stop a new person from signing up; they can add a photo later."""
     def boom(stream, **o):
         raise RuntimeError("network down")
 
     monkeypatch.setattr(cloudinary_service.cloudinary.uploader, "upload", boom)
     res = register(client)
-    assert res.status_code == 200 and b"could not upload" in res.data
-    assert User.query.count() == 0 and b"network down" not in res.data
+    assert res.status_code == 302 and b"network down" not in res.data
+    user = User.query.one()
+    assert user.avatar_url is None and user.avatar_public_id is None
 
 
-def test_cloudinary_not_configured(app, client, fakes):
+def test_cloudinary_not_configured_never_blocks_sign_up(app, client, fakes):
     app.config["CLOUDINARY_API_SECRET"] = ""
     res = register(client)
-    assert b"not set up yet" in res.data and User.query.count() == 0
+    assert res.status_code == 302
+    assert User.query.one().avatar_url is None
 
 
 # ------------------------------------------------------------------ re-register / cleanup
@@ -185,7 +194,7 @@ def test_verify_success_logs_in(client, fakes):
     res = register_and_verify(client, fakes)
     assert res.status_code == 302
     assert User.query.one().is_email_verified is True
-    assert b"Arnab Adhikari" in client.get("/").data
+    assert b"Arnab Adhikari" in client.get("/profile").data
 
 
 def test_wrong_code_counts_down_then_locks(client, fakes):
@@ -268,7 +277,7 @@ def test_login_with_username_and_email(client, fakes):
     assert login(client).status_code == 302
     client.post("/logout")
     assert login(client, "ARNAB@example.com").status_code == 302
-    assert b"Arnab Adhikari" in client.get("/").data
+    assert b"Arnab Adhikari" in client.get("/profile").data
 
 
 def test_wrong_password_and_unknown_user_look_the_same(client, fakes):
@@ -284,7 +293,7 @@ def test_unverified_user_cannot_log_in(client, fakes):
     client.get("/logout")
     res = login(client)
     assert res.status_code == 302 and "/verify-email" in res.headers["Location"]
-    assert client.get("/").status_code == 302          # still not signed in
+    assert client.get("/profile").status_code == 302          # still not signed in
     assert len(fakes.sent) >= 1
 
 
@@ -294,22 +303,22 @@ def test_blocked_accounts_cannot_log_in(client, fakes, status, text):
     User.query.one().status = status
     db.session.commit()
     assert text in login(client).data
-    assert client.get("/").status_code == 302
+    assert client.get("/profile").status_code == 302
 
 
 def test_suspending_a_logged_in_user_ends_their_session(client, fakes):
     register_and_verify(client, fakes)
-    assert client.get("/").status_code == 200
+    assert client.get("/profile").status_code == 200
     User.query.one().status = "suspended"
     db.session.commit()
-    assert client.get("/").status_code == 302
+    assert client.get("/profile").status_code == 302
 
 
 def test_logout_needs_post_and_ends_session(client, fakes):
     register_and_verify(client, fakes)
     assert client.get("/logout").status_code == 405
     client.post("/logout")
-    assert client.get("/").status_code == 302
+    assert client.get("/profile").status_code == 302
 
 
 def test_logged_in_user_skips_auth_pages(client, fakes):
@@ -440,17 +449,31 @@ def test_csrf_is_enforced(app, client, fakes):
     assert res.status_code == 400
 
 
-def test_login_is_rate_limited(monkeypatch):
+def _limited_app(monkeypatch):
     from app import config, create_app
 
     monkeypatch.setattr(config.TestingConfig, "RATELIMIT_ENABLED", True)
-    app = create_app("testing")          # a separate app where the limiter is switched on
+    return create_app("testing")          # a separate app where the limiter is switched on
+
+
+def test_login_is_rate_limited_per_address(monkeypatch):
+    """Ten tries a minute from one address (different account names each time), the eleventh is refused."""
+    app = _limited_app(monkeypatch)
     with app.app_context():
         db.create_all()
         client = app.test_client()
-        codes = [client.post("/login", data={"identifier": "x", "password": "y"}).status_code
-                 for _ in range(12)]
+        codes = [client.post("/login", data={"identifier": f"user{i}", "password": "y"}).status_code for i in range(12)]
         assert codes[:10] == [200] * 10 and codes[10] == 429
+
+
+def test_login_is_rate_limited_per_account(monkeypatch):
+    """One account name is limited on its own (default 8 per 15 minutes) so it cannot be hammered from many addresses."""
+    app = _limited_app(monkeypatch)
+    with app.app_context():
+        db.create_all()
+        client = app.test_client()
+        codes = [client.post("/login", data={"identifier": "x", "password": "y"}).status_code for _ in range(10)]
+        assert codes[:8] == [200] * 8 and codes[8] == 429
 
 
 def test_language_switch_sets_cookie_and_blocks_bad_redirect(client):

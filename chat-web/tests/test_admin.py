@@ -20,7 +20,7 @@ def admin_rules(app):
 
 
 def fill(rule):
-    return rule.rule.replace("<int:user_id>", "1").replace("<int:report_id>", "1").replace("<int:announcement_id>", "1")
+    return rule.rule.replace("<int:user_id>", "1").replace("<int:report_id>", "1").replace("<int:announcement_id>", "1").replace("<int:subscription_id>", "1")
 
 
 def test_admin_routes_exist(app):
@@ -47,7 +47,7 @@ def test_normal_user_cannot_change_anything_through_admin_posts(app, site):
 def test_admin_role_comes_only_from_the_env_list(app, site):
     assert User.query.filter_by(username="boss").one().role == "admin"
     assert User.query.filter_by(username="alice").one().role == "user"
-    assert b"/admin" not in site.a.get("/").data and b"/admin" in site.admin.get("/").data
+    assert b"/admin" not in site.a.get("/profile").data and b"/admin" in site.admin.get("/profile").data
 
 
 def test_admin_panel_is_not_in_a_normal_users_pages(app, site):
@@ -105,9 +105,9 @@ def set_status(site, user, status):
 
 
 def test_suspend_logs_the_user_out_and_blocks_login(app, site):
-    assert site.a.get("/").status_code == 200
+    assert site.a.get("/profile").status_code == 200
     set_status(site, site.alice, "suspended")
-    assert site.a.get("/").status_code == 302                                # signed out at once
+    assert site.a.get("/profile").status_code == 302                                # signed out at once
     res = app.test_client().post("/login", data={"identifier": "alice", "password": "secret123"})
     assert res.status_code == 200 and b"suspended" in res.data
 
@@ -116,7 +116,7 @@ def test_ban_and_restore(app, site):
     set_status(site, site.alice, "banned")
     assert b"not available" in app.test_client().post("/login", data={"identifier": "alice", "password": "secret123"}).data
     set_status(site, site.alice, "active")
-    assert login_as(app, site.alice).get("/").status_code == 200
+    assert login_as(app, site.alice).get("/profile").status_code == 200
     assert Notification.query.filter_by(user_id=site.alice.id, type="account_restored").count() == 1
 
 
@@ -140,7 +140,7 @@ def test_bad_status_value(app, site):
 def test_status_change_is_logged(app, site):
     set_status(site, site.alice, "suspended")
     log = AdminAuditLog.query.one()
-    assert log.action == "user.status" and log.target_id == site.alice.id and log.details == {"from": "active", "to": "suspended"}
+    assert log.action == "user.status" and log.target_id == site.alice.id and log.details == {"from": "active", "to": "suspended", "days": None}   # "days" = length of a timed suspension
     assert b"user.status" in site.admin.get("/admin/audit").data
 
 

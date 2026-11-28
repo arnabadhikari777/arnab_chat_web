@@ -1,21 +1,9 @@
 .env
 .venv
 /venv
-*.a
-native/lib/
-native/obj/
-calling-server/bin/
-secure-media-rs/target/
-*.o
-__pycache__/
-*.pyc
-.pytest_cache/
-node_modules/
-android-app/android/.gradle/
-android-app/android/app/build/
-android-app/android/build/
-android-app/android/local.properties
-android-app/android/app/google-services.json
-*.jks
-*.keystore
-.DS_Store
+
+# Generated native build output: rebuilt from source by scripts/build_native.sh and the Dockerfile (never commit)
+/native/lib/*.a
+/native/obj/
+/secure-media-rs/target/
+/calling-server/bin/

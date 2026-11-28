@@ -16,7 +16,10 @@ def site(app):
 
 
 ON = {"registration_open": "on", "login_open": "on", "chat_enabled": "on", "message_requests_enabled": "on",
-      "sending_enabled": "on", "push_enabled": "on", "announcements_enabled": "on"}
+      "sending_enabled": "on", "push_enabled": "on", "announcements_enabled": "on",
+      # Switches added after this file was written. The settings form sends every checkbox that is ticked,
+      # so a helper that mimics the browser must send them too (an absent checkbox means "off").
+      "people_enabled": "on", "profile_edit_enabled": "on", "uploads_enabled": "on", "voice_enabled": "on"}
 
 
 def save(site, **changes):
@@ -56,7 +59,7 @@ def test_saving_writes_only_what_changed_and_audits_it(app, site):
     assert rows == {"maintenance_mode": "1", "site_name": "Test Chat"}
     log = AdminAuditLog.query.filter_by(action="settings.update").one()
     assert log.admin_id == site.boss.id
-    assert log.details["changes"]["maintenance_mode"] == {"from": False, "to": True}
+    assert log.details["changed"]["maintenance_mode"] == {"from": False, "to": True}
 
 
 def test_saving_the_same_values_logs_nothing(app, site):
@@ -73,7 +76,9 @@ def test_unknown_fields_cannot_be_written(app, site):
 def test_text_limits_and_line_breaks_are_refused(app, site):
     res = save(site, site_name="x" * 41)
     assert res.status_code == 200 and SiteSetting.query.count() == 0
-    assert save(site, maintenance_message="a\nb").status_code == 200
+    # site_name is a one-line field: a line break is refused. maintenance_message is a multi-line text area.
+    assert save(site, site_name="a\nb").status_code == 200 and SiteSetting.query.count() == 0
+    assert save(site, maintenance_message="a\nb").status_code == 302
 
 
 def test_csrf_is_required(app, site):
@@ -122,9 +127,12 @@ def test_maintenance_off_again_restores_the_site(app, site):
 def test_registration_toggle(app, site):
     save(site, registration_open=False)
     anon = app.test_client()
-    assert anon.get("/register").status_code == 503
+    # The /register route answers itself: back to the sign-in page with a "sign-ups are closed" notice.
+    res = anon.get("/register")
+    assert res.status_code == 302 and "/login" in res.headers["Location"]
+    assert b"closed" in anon.get("/login").data
     assert anon.post("/register", data={"full_name": "N", "email": "n@example.com", "username": "newbie",
-                                        "password": "secret123", "confirm_password": "secret123"}).status_code == 503
+                                        "password": "secret123", "confirm_password": "secret123"}).status_code == 302
     assert User.query.filter_by(username="newbie").count() == 0
     save(site, registration_open=True)
     assert app.test_client().get("/register").status_code == 200
@@ -186,7 +194,9 @@ def test_push_switch_stops_config_registration_and_sending(app, site, configured
     assert site.b.get("/api/push/config").get_json()["configured"] is True
     save(site, push_enabled=False)
     body = site.b.get("/api/push/config").get_json()
-    assert body["configured"] is False and body["publicKey"] is None
+    # The server is still configured; the admin switch is reported separately so the page can say "switched off by
+    # the admin" instead of "server not configured" (see push.js: server_disabled vs server_not_configured).
+    assert body["configured"] is True and body["enabled"] is False
     assert site.b.post("/api/push/subscribe", json=sub_json(1)).status_code == 503
     save(site, push_enabled=True)
     assert site.b.post("/api/push/subscribe", json=sub_json(1)).status_code == 200

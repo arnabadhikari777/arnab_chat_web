@@ -57,4 +57,6 @@ def bundle(lang: str | None = None) -> dict[str, str]:
 def init_i18n(app) -> None:
     @app.context_processor
     def _inject():
-        return {"t": t, "lang": get_language(), "app_name": app.config["APP_NAME"]}
+        # The admin "site name" setting (falls back to APP_NAME when empty) is what every page shows.
+        from ..services import site_settings
+        return {"t": t, "lang": get_language(), "app_name": site_settings.site_name()}
