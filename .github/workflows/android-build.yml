@@ -20,9 +20,11 @@ on:
       - "android-app/**"
       - ".github/workflows/android-build.yml"
       - "chat-web/app/static/js/platform.js"
+      - "scripts/**"
   pull_request:
     paths:
       - "android-app/**"
+      - "scripts/**"
 
 permissions:
   contents: read
